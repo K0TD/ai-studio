@@ -1,0 +1,33 @@
+"use client";
+
+// Client-side access to the StudioClientConfig: client components
+// read cost/balance/branding/feature-flag data from here instead of
+// importing host-specific model/catalog constants directly. Wired by
+// <Studio> (./studio.tsx), which the host renders with the server-derived
+// config (deriveClientConfig) around its own shell tree.
+
+import { createContext, useContext } from "react";
+
+import type { StudioClientConfig } from "../config/types";
+
+const StudioConfigContext = createContext<StudioClientConfig | null>(null);
+
+export const StudioConfigProvider = ({
+  config,
+  children,
+}: {
+  config: StudioClientConfig;
+  children: React.ReactNode;
+}) => (
+  <StudioConfigContext.Provider value={config}>
+    {children}
+  </StudioConfigContext.Provider>
+);
+
+export const useStudioConfig = (): StudioClientConfig => {
+  const config = useContext(StudioConfigContext);
+  if (!config) {
+    throw new Error("useStudioConfig() called outside <StudioConfigProvider>");
+  }
+  return config;
+};

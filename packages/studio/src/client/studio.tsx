@@ -1,0 +1,71 @@
+"use client";
+
+// The <Studio /> root. Host apps render this
+// once, passing the serializable StudioClientConfig (derived server-side via
+// deriveClientConfig — never the full StudioConfig with secrets/workflow
+// graphs) and the signed-in user. <Studio> owns the full component tree
+// (StudioShell and everything under it) and every context descendants need:
+// config, user, the ky HTTP client, and the per-mount zustand store. Hosts
+// that need imageLoader/onSignOut — functions, which can't cross the
+// server/client boundary as props from an async Server Component — pass them
+// here directly; <Studio> merges them into the config it provides.
+
+import { useState } from "react";
+
+import type { StudioClientConfig } from "../config/types";
+import { StudioShell } from "./components/studio-shell";
+import { createStudioStore, StudioStoreContext } from "./store/studio-store";
+import { StudioConfigProvider } from "./studio-config-provider";
+import { StudioHttpProvider } from "./studio-http-context";
+import type { StudioUser } from "./studio-user-context";
+import { StudioUserProvider } from "./studio-user-context";
+import { TooltipProvider } from "./ui/tooltip";
+
+export const Studio = ({
+  config,
+  user,
+  imageLoader,
+  onSignOut,
+  loginUrl,
+  brandIcon,
+  headerActions,
+  notchWidth,
+}: {
+  config: StudioClientConfig;
+  user: StudioUser;
+  imageLoader?: StudioClientConfig["imageLoader"];
+  onSignOut?: StudioClientConfig["onSignOut"];
+  loginUrl?: string;
+  brandIcon?: StudioClientConfig["brandIcon"];
+  headerActions?: StudioClientConfig["headerActions"];
+  notchWidth?: StudioClientConfig["notchWidth"];
+}) => {
+  const resolvedConfig: StudioClientConfig = {
+    ...config,
+    brandIcon: brandIcon ?? config.brandIcon,
+    headerActions: headerActions ?? config.headerActions,
+    imageLoader: imageLoader ?? config.imageLoader,
+    loginUrl: loginUrl ?? config.loginUrl,
+    notchWidth: notchWidth ?? config.notchWidth,
+    onSignOut: onSignOut ?? config.onSignOut,
+  };
+  const [store] = useState(() => createStudioStore(resolvedConfig));
+
+  return (
+    <StudioConfigProvider config={resolvedConfig}>
+      <StudioUserProvider user={user}>
+        <StudioHttpProvider apiBasePath={resolvedConfig.apiBasePath}>
+          <StudioStoreContext.Provider value={store}>
+            {/* Studio components use Tooltip internally — provide the context
+                here so hosts don't need their own TooltipProvider. */}
+            <TooltipProvider>
+              <StudioShell />
+            </TooltipProvider>
+          </StudioStoreContext.Provider>
+        </StudioHttpProvider>
+      </StudioUserProvider>
+    </StudioConfigProvider>
+  );
+};
+
+export type { StudioUser } from "./studio-user-context";
