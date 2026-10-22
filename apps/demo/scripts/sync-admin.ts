@@ -15,9 +15,10 @@ try {
       event: "admin.environment_sync",
     })
   );
-} catch {
+} catch (error) {
   console.error(
-    "Не удалось синхронизировать администратора. Проверьте конфигурацию, миграции и уникальность логина/email."
+    "Не удалось синхронизировать администратора:",
+    error instanceof Error ? error.message : error
   );
   process.exitCode = 1;
 } finally {
