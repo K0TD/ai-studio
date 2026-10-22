@@ -110,12 +110,12 @@ export const AdminService = {
   },
   async getStats(): Promise<SystemStats> {
     const totals = await pool.query<SystemStats>(`select
-      (select count(*)::int from "user") as "totalUsers",
-      (select coalesce(sum(balance_rub),0)::text from "user") as "totalBalanceRub",
-      (select coalesce(-sum(amount_rub),0)::text from transactions where type='generation_cost'
+      (select cast(count(*) as integer) from "user") as "totalUsers",
+      (select cast(coalesce(sum(balance_rub),0) as text) from "user") as "totalBalanceRub",
+      (select cast(coalesce(-sum(amount_rub),0) as text) from transactions where type='generation_cost'
         and created_at >= date_trunc('day', now() at time zone 'Europe/Moscow') at time zone 'Europe/Moscow') as "totalSpentTodayRub",
-      (select count(*)::int from syntx_jobs where settled_at is null) as "activeGenerations",
-      (select count(*)::int from syntx_catalog) as "supportedModelsCount",
+      (select cast(count(*) as integer) from syntx_jobs where settled_at is null) as "activeGenerations",
+      (select cast(count(*) as integer) from syntx_catalog) as "supportedModelsCount",
       case when exists(select 1 from syntx_catalog where verified_at > now()-interval '24 hours') then 'operational' else 'down' end as "routerAiStatus"`);
     return totals.rows[0];
   },
@@ -164,7 +164,7 @@ export const AdminService = {
     const rows = await db
       .select({
         account: user,
-        totalGenerations: sql<number>`(select count(*)::int from syntx_jobs where user_id = ${user.id})`,
+        totalGenerations: sql<number>`(select count(*) from syntx_jobs where user_id = ${user.id})`,
       })
       .from(user)
       .where(filter)

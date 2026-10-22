@@ -2,7 +2,6 @@ name: studio
 
 x-runtime: &runtime
   image: studio-app:${APP_IMAGE_TAG:-local}
-  build: { context: ., dockerfile: Dockerfile }
   restart: unless-stopped
   init: true
   read_only: true
@@ -59,7 +58,6 @@ services:
 
   media-init:
     image: studio-app:${APP_IMAGE_TAG:-local}
-    build: { context: ., dockerfile: Dockerfile }
     user: "0:0"
     restart: "no"
     read_only: true
@@ -78,6 +76,7 @@ services:
 
   web:
     <<: *runtime
+    build: { context: ., dockerfile: Dockerfile }
     ports:
       - "127.0.0.1:${APP_PORT:-3050}:3000"
     expose: ["3000"]
