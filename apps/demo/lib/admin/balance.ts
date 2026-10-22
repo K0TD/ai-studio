@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 
 import { formatKopecks, parseRub } from "../billing/money";
 import { db } from "../db";
-import { adminAudit, transactions, user } from "../db/schema";
+import { adminAudit, transactions, user } from "../db/active-schema";
+import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import { lockAdminUsers } from "./authorization";
 import { userView } from "./user-view";
@@ -14,7 +15,7 @@ interface BalanceAdjustment {
   key: string;
 }
 export const adjustBalance = (adjustment: BalanceAdjustment) =>
-  db.transaction(async (tx) => {
+  db.transaction(async (tx: DatabaseTransaction) => {
     const target = await lockAdminUsers(
       tx,
       adjustment.actorId,

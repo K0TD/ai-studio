@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db, pool } from "../db";
 import { adminAudit, session, transactions, user } from "../db/active-schema";
+import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import {
   CLOSED_PERMISSIONS,
@@ -37,7 +38,7 @@ export const updateAccessSchema = z
 export const AdminService = {
   async createUser(actorId: string, params: z.infer<typeof createUserSchema>) {
     try {
-      return await db.transaction(async (tx) => {
+      return await db.transaction(async (tx: DatabaseTransaction) => {
         await lockAdmin(tx, actorId);
         const id = crypto.randomUUID();
         const effectivePermissions =
@@ -142,7 +143,7 @@ export const AdminService = {
       limit: query.limit,
       page: query.page,
       total: aggregate.total,
-      transactions: rows.map((row) => ({
+      transactions: rows.map((row: any) => ({
         ...row.transaction,
         userName: row.userName,
       })),
@@ -179,7 +180,7 @@ export const AdminService = {
       page: query.page,
       stats: await this.getStats(),
       total: aggregate.total,
-      users: rows.map((row) => ({
+      users: rows.map((row: any) => ({
         ...userView(row.account),
         totalGenerations: row.totalGenerations,
       })),
@@ -190,7 +191,7 @@ export const AdminService = {
     targetId: string,
     change: z.infer<typeof updateAccessSchema>
   ) {
-    return db.transaction(async (tx) => {
+    return db.transaction(async (tx: DatabaseTransaction) => {
       const target = await lockAdminUsers(tx, actorId, targetId);
       if (
         target.isEnvAdmin &&

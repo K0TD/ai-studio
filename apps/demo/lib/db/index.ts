@@ -164,7 +164,7 @@ export const pool = {
   },
   on(event: string, callback: (...args: any[]) => void) {
     if (isPostgres) {
-      getPgPool().on(event, callback);
+      getPgPool().on(event as any, callback);
     }
   },
   async query<T = any>(
@@ -276,7 +276,9 @@ export const getDb = () => {
   return drizzleInstance;
 };
 
-export const db = new Proxy({} as any, {
+export type AppDb = ReturnType<typeof drizzlePg<typeof pgSchema>>;
+
+export const db: AppDb = new Proxy({} as AppDb, {
   get(_target, prop) {
     const instance = getDb();
     const value = instance[prop];

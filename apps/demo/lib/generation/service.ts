@@ -68,7 +68,7 @@ export const assertAccountAccess = (
 };
 
 const checkOwnedRequest = async (
-  client: Pick<PoolClient, "query">,
+  client: { query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number }> },
   accountId: string,
   request: GenerationRequest
 ) => {

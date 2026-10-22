@@ -193,7 +193,7 @@ export const filesPost = apiRoute(async (request) => {
   const uploadAllowed =
     user.role === "admin" ||
     user.role === "vip" ||
-    user.permissions?.sections?.some((s) => s === "video" || s === "image");
+    user.permissions?.sections?.some((s: string) => s === "video" || s === "image");
   if (!user.isApproved || !uploadAllowed) {
     throw new ApiError(403, "Загрузка референсов недоступна");
   }

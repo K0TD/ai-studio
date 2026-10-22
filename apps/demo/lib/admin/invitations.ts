@@ -15,8 +15,8 @@ export const createInvitation = async (
   userId: string
 ): Promise<string> => {
   const token = randomBytes(32).toString("base64url");
-  await tx.delete(invitation).where(eq(invitation.userId, userId));
-  await tx.insert(invitation).values({
+  await (tx as any).delete(invitation).where(eq(invitation.userId, userId));
+  await (tx as any).insert(invitation).values({
     expiresAt: new Date(Date.now() + 86_400_000),
     id: crypto.randomUUID(),
     tokenHash: tokenDigest(token),
@@ -28,7 +28,7 @@ export const renewInvitation = (
   actorId: string,
   userId: string
 ): Promise<string> =>
-  db.transaction(async (tx) => {
+  db.transaction(async (tx: DatabaseTransaction) => {
     const target = await lockAdminUsers(tx, actorId, userId);
     if (target.isEnvAdmin || target.isBanned) {
       throw new ApiError(403, "Для этого аккаунта ссылка недоступна");
@@ -61,7 +61,7 @@ export const activateAccount = async (
     throw new ApiError(400, "Ссылка недействительна или истекла");
   }
   const passwordHash = await hashPassword(password);
-  await db.transaction(async (tx) => {
+  await db.transaction(async (tx: DatabaseTransaction) => {
     const targetQuery = tx
       .select()
       .from(user)
