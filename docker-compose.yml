@@ -1,0 +1,150 @@
+name: studio
+
+x-runtime: &runtime
+  image: studio-app:${APP_IMAGE_TAG:-local}
+  build: { context: ., dockerfile: Dockerfile }
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:mode=1777,size=128m
+    - /app/apps/demo/.next/cache:uid=1001,gid=1001,mode=0770,size=128m
+  environment: &application-env
+    NODE_ENV: production
+    DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the private postgres service URL}
+    ROUTERAI_API_KEY: ${ROUTERAI_API_KEY:?Set ROUTERAI_API_KEY}
+    BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a unique BETTER_AUTH_SECRET}
+    BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set the public HTTPS application URL}
+    ADMIN_LOGIN: ${ADMIN_LOGIN:?Set ADMIN_LOGIN}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set a strong ADMIN_PASSWORD}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    MEDIA_ROOT: /data/media
+    QUOTE_MAXIMUM_MULTIPLIER: ${QUOTE_MAXIMUM_MULTIPLIER:-1.20}
+  volumes: [media:/data/media]
+  depends_on:
+    postgres: { condition: service_healthy }
+    media-init: { condition: service_completed_successfully }
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:16.13-alpine3.23@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test:
+        [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  media-init:
+    image: studio-app:${APP_IMAGE_TAG:-local}
+    build: { context: ., dockerfile: Dockerfile }
+    user: "0:0"
+    restart: "no"
+    read_only: true
+    network_mode: none
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - media:/data/media
+      - backup_work:/work
+    command:
+      [
+        sh,
+        -c,
+        "chown 1001:1001 /data/media /work && chmod 0700 /data/media /work",
+      ]
+
+  web:
+    <<: *runtime
+    expose: ["3000"]
+    healthcheck:
+      test: [CMD, bun, scripts/healthcheck.ts]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    <<: *runtime
+    command: [bun, run, worker]
+    stop_grace_period: 120s
+    healthcheck:
+      test: [CMD, bun, scripts/worker-healthcheck.ts]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  init:
+    <<: *runtime
+    profiles: [ops]
+    restart: "no"
+    command: [sh, -c, "bun --bun run db:migrate && bun run sync-admin"]
+
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set the public DNS hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the TLS certificate contact email}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web: { condition: service_healthy }
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  backup:
+    profiles: [ops]
+    build: { context: ./ops, dockerfile: Dockerfile.backup }
+    restart: "no"
+    user: "1001:1001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:mode=1777,size=128m"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:?Set POSTGRES_DB}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      AWS_ACCESS_KEY_ID: ${BACKUP_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${BACKUP_AWS_DEFAULT_REGION:-}
+      RESTIC_CACHE_DIR: /work/restic-cache
+    volumes:
+      - media:/data/media:ro
+      - backup_work:/work
+      - ./secrets/restic-password:/run/secrets/restic_password:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      media-init: { condition: service_completed_successfully }
+
+volumes:
+  postgres_data:
+  media:
+  backup_work:
+  caddy_data:
+  caddy_config:

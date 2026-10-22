@@ -1,102 +1,91 @@
 "use client";
-
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { signIn, signUp } from "@/lib/auth-client";
-
-export const LoginForm = () => {
+import { authClient } from "@/lib/auth-client";
+import { safeCallbackUrl } from "@/lib/store/client-policy";
+export const LoginForm = ({
+  admin = false,
+  callbackUrl = "/",
+}: {
+  admin?: boolean;
+  callbackUrl?: string;
+}) => {
   const router = useRouter();
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setError(null);
     setPending(true);
-    const result =
-      mode === "sign-in"
-        ? await signIn.email({ email, password })
-        : await signUp.email({ email, name, password });
-    setPending(false);
-    if (result.error) {
-      setError(result.error.message ?? "Something went wrong");
-      return;
+    setError(null);
+    try {
+      const result = admin
+        ? await authClient.signIn.username({ password, username: login })
+        : await authClient.signIn.email({ email: login, password });
+      if (result.error) {
+        setError("Не удалось войти. Проверьте логин и пароль.");
+        return;
+      }
+      router.replace(safeCallbackUrl(callbackUrl));
+      router.refresh();
+    } catch {
+      setError("Сервис временно недоступен. Повторите вход.");
+    } finally {
+      setPending(false);
     }
-    router.push("/studio");
-    router.refresh();
   };
-
   return (
     <form
-      className="flex flex-col gap-4 rounded-lg border border-border bg-card p-6"
-      onSubmit={handleSubmit}
+      onSubmit={submit}
+      className="flex flex-col gap-5 rounded-3xl border border-border bg-card p-7 shadow-xl"
     >
-      <h1 className="font-semibold text-card-foreground text-lg">
-        {mode === "sign-in" ? "Sign in" : "Create an account"}
-      </h1>
-
-      {mode === "sign-up" && (
-        <label className="flex flex-col gap-1 text-sm">
-          Name
-          <input
-            className="rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            onChange={(event) => setName(event.target.value)}
-            required
-            type="text"
-            value={name}
-          />
-        </label>
-      )}
-
-      <label className="flex flex-col gap-1 text-sm">
-        Email
+      <div>
+        <span className="text-sm font-bold text-[#f05138]">k0td.ai</span>
+        <h1 className="mt-2 text-2xl font-semibold">
+          {admin ? "Вход администратора" : "Вход в студию"}
+        </h1>
+      </div>
+      <label className="grid gap-2 text-sm">
+        {admin ? "Логин" : "Email"}
         <input
-          className="rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="username"
+          className="rounded-xl border border-input bg-background px-3 py-2.5"
           required
-          type="email"
-          value={email}
+          type={admin ? "text" : "email"}
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
         />
       </label>
-
-      <label className="flex flex-col gap-1 text-sm">
-        Password
+      <label className="grid gap-2 text-sm">
+        Пароль
         <input
-          className="rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-          minLength={8}
-          onChange={(event) => setPassword(event.target.value)}
+          autoComplete="current-password"
+          className="rounded-xl border border-input bg-background px-3 py-2.5"
           required
           type="password"
           value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
       </label>
-
-      {error && <p className="text-destructive text-sm">{error}</p>}
-
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
       <button
-        className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground text-sm disabled:opacity-50"
         disabled={pending}
-        type="submit"
+        className="rounded-xl bg-[#f05138] px-4 py-3 font-semibold text-white disabled:opacity-50"
       >
-        {mode === "sign-in" ? "Sign in" : "Sign up"}
+        {pending ? "Входим…" : "Войти"}
       </button>
-
-      <button
-        className="text-muted-foreground text-sm underline"
-        onClick={() =>
-          setMode((current) => (current === "sign-in" ? "sign-up" : "sign-in"))
-        }
-        type="button"
-      >
-        {mode === "sign-in"
-          ? "Need an account? Sign up"
-          : "Already have an account? Sign in"}
-      </button>
+      {!admin && (
+        <p className="text-sm text-muted-foreground">
+          Для получения доступа обратитесь к администратору. Новый аккаунт
+          активируется по приглашению.
+        </p>
+      )}
     </form>
   );
 };

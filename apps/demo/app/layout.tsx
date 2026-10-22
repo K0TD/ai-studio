@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
 import { Providers } from "./providers";
@@ -6,17 +7,24 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  description: "Reference app for @two-71/studio",
-  title: "2.71 Studio",
+  description:
+    "k0td AI Studio — генерация видео, изображений и аудио на базе RouterAI.",
+  title: "k0td AI Studio",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const requestHeaders = await headers();
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
   return (
     // suppressHydrationWarning: next-themes stamps the theme class on <html>
     // before hydration.
-    <html lang="en" suppressHydrationWarning>
+    <html lang="ru" suppressHydrationWarning>
       <body>
-        <Providers>{children}</Providers>
+        <Providers nonce={nonce}>{children}</Providers>
       </body>
     </html>
   );

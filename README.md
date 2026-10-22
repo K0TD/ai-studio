@@ -1,109 +1,58 @@
-> [!WARNING]
-> This project is under active development. APIs, config shapes, and database schema may change between releases without notice — expect breaking changes until a stable release.
+# k0td AI Studio
 
-<h3 align="center">Studio</h3>
+Веб-сервис генерации видео, изображений и речи через RouterAI. Next.js 16, React 19, PostgreSQL, Better Auth и отдельный фоновый worker. Финансовый учет и права пользователей проверяются сервером; суммы отображаются в рублях.
 
-<p align="center">
-    Open-source AI image &amp; video generation studio for Next.js.
-    <br />
-    <a href="https://studio.271.dev"><strong>Try the demo »</strong></a>
-    <br />
-    <br />
-    <a href="#introduction"><strong>Introduction</strong></a> ·
-    <a href="#features"><strong>Features</strong></a> ·
-    <a href="#tech-stack"><strong>Tech Stack</strong></a> ·
-    <a href="#self-hosting"><strong>Self-Hosting</strong></a> ·
-    <a href="#contributing"><strong>Contributing</strong></a>
-</p>
+Учетные записи создает администратор. Пользователь устанавливает пароль по одноразовой ссылке, после чего администратор назначает разрешенные разделы и модели, бюджет, число параллельных задач и баланс. Самостоятельная регистрация и гостевая генерация закрыты.
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@two-71/studio">
-    <img src="https://img.shields.io/npm/v/%40two-71%2Fstudio?logo=npm&color=cb3837&logoColor=fff" alt="npm version" />
-  </a>
-  <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" />
-  </a>
-</p>
+## Production
 
-<br/>
-
-<a href="https://studio.271.dev">
-  <img alt="Studio — open-source AI image and video generation studio for Next.js" src="./.github/hero.png">
-</a>
-
-<br/>
-
-## Introduction
-
-Studio is a config-driven, self-hostable AI generation surface you install into your own Next.js app. Bring a ComfyUI workflow running on RunPod serverless plus your own auth, billing, moderation, and storage providers — Studio handles the rest: the generation pipeline (via Trigger.dev), realtime progress, and the gallery UI.
-
-It's a library, not a hosted product: `bun add @two-71/studio`, wire it up with a single `StudioConfig` object, and mount `<Studio />`. See it live at [studio.271.dev](https://studio.271.dev).
-
-## Features
-
-- **Multi-model catalog** — text-to-image across any number of models, each with its own ComfyUI workflow, aspect ratios, and resolutions
-- **Image-to-video** — animate any generated image with a video workflow
-- **ComfyUI on RunPod serverless** — bring your exact workflow graph; Studio maps prompts, seeds, and controls onto its nodes
-- **Realtime progress** — live pipeline steps streamed to the client via Trigger.dev realtime
-- **Controls** — LoRAs, pose control images, and reference-image identity editing
-- **Gallery** — lightbox, bulk select/delete, copy/download, optimistic cards
-- **Prompt enhancement & titles** — optional LLM-backed prompt rewrite and result naming
-- **Watermarking** — SVG badge, text, or diagonal watermark baked into outputs
-- **Pluggable providers** — auth, billing (coins/credits), moderation, and storage are interfaces; sensible free/open defaults included
-- **Theming** — light/dark/system with host-controlled branding
-
-## Tech Stack
-
-- [Next.js](https://nextjs.org/) – framework
-- [TypeScript](https://www.typescriptlang.org/) – language
-- [Tailwind](https://tailwindcss.com/) – CSS
-- [Trigger.dev](https://trigger.dev/) – background tasks + realtime
-- [RunPod](https://www.runpod.io/) – serverless ComfyUI inference
-- [Drizzle](https://orm.drizzle.team/) – ORM
-- [TanStack Query](https://tanstack.com/query) – data fetching
-- [Zustand](https://zustand.docs.pmnd.rs/) – state
-- [shadcn/ui](https://ui.shadcn.com/) – components
-- [Cloudflare R2](https://developers.cloudflare.com/r2/) – storage (any S3-compatible bucket)
-
-## Self-Hosting
-
-Everything runs on your own accounts — your Next.js host, your RunPod endpoints, your Trigger.dev project, your bucket, your database.
-
-- [`packages/studio/README.md`](./packages/studio/README.md) — install + full wiring guide for the `StudioConfig` object
-- [`docs/runpod-setup.md`](./docs/runpod-setup.md) — stand up a serverless ComfyUI endpoint
-- [`docs/trigger-setup.md`](./docs/trigger-setup.md) — background tasks + realtime
-- [`docs/providers.md`](./docs/providers.md) — auth, billing, moderation, storage interfaces
-- [`docs/deploy-vercel.md`](./docs/deploy-vercel.md) — production deployment
-
-## What's in this repo
-
-- [`packages/studio`](./packages/studio) — the `@two-71/studio` library
-- [`apps/demo`](./apps/demo) — the reference app behind [studio.271.dev](https://studio.271.dev): guest mode (no signup, daily IP-based quota), a Krea 2 image model with LoRAs/pose/reference controls, and an LTX image-to-video model
-
-## Quickstart
-
-The fastest way to see Studio running locally is the demo app:
+Полная инструкция развертывания VPS, обновлений, резервирования и восстановления: [docs/production.md](docs/production.md).
 
 ```sh
-bun install
+cp .env.docker.example .env
+chmod 600 .env
+# Заполните все обязательные значения, настройте DNS и внешние резервные копии.
+docker compose --env-file .env config -q
+docker compose build web backup
+docker compose up -d postgres media-init
+docker compose --profile ops run --rm init
+docker compose up -d web worker caddy
 ```
 
-Then follow [`apps/demo/README.md`](./apps/demo/README.md) for env vars, database migrations, the Trigger.dev dev server, and standing up the RunPod endpoint.
+Compose публикует только порты 80/443. PostgreSQL и media volume приватные. Caddy выпускает TLS-сертификат для `APP_DOMAIN`. `init` применяет миграции и синхронизирует защищенного администратора из `ADMIN_LOGIN` / `ADMIN_PASSWORD`; затем доступен `/admin/login`.
 
-## Contributing
+Не запускайте миграции существующей базы без проверенной резервной копии. Команды выше предназначены для подготовленного окружения; прохождение CI и восстановление на отдельном стенде обязательны перед приемкой production.
 
-- [Open an issue](https://github.com/two-71/studio/issues) if you believe you've encountered a bug.
-- Make a [pull request](https://github.com/two-71/studio/pulls) to add new features, make quality-of-life improvements, or fix bugs.
+## Разработка
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full guide.
+Нужны Bun 1.3.14 и PostgreSQL 16. Создайте `apps/demo/.env.local` по примеру, задайте настоящие настройки БД и RouterAI. Пример не содержит паролей. Файлы окружения не входят в Docker build context.
 
-### Recommended Versions
+```sh
+bun install --frozen-lockfile
+cd apps/demo
+bun run db:migrate
+bun run sync-admin
+bun run dev
+# В другом терминале, из apps/demo:
+bun run worker
+```
 
-| Package | Version |
-| ------- | ------- |
-| bun     | 1.2+    |
-| node    | 20+     |
+Клиент: `http://localhost:3000`, администратор: `/admin/login`. Для разработки `BETTER_AUTH_URL` допускает HTTP; production требует HTTPS. Неподключенные модели и режимы не возвращают успешные демонстрационные результаты.
 
-## License
+## Проверки
 
-[MIT](./LICENSE)
+```sh
+bun run typecheck
+bun run check
+bun test
+bun run build
+bun audit --audit-level high
+```
+
+CI также проверяет историю Git на секреты и собирает контейнер. Документация API и структура приложения: [apps/demo/README.md](apps/demo/README.md).
+
+## Каталог моделей и тарифы
+
+Доступность моделей и оценка стоимости определяются серверным каталогом RouterAI и индивидуальными разрешениями пользователя. Перед запуском интерфейс показывает оценку и максимальное списание; после завершения — фактическую стоимость либо явно отмеченную оценку. Статические цены в документации не используются для расчетов.
+
+Неподключенные режимы, включая генерацию музыки Suno, смену голоса и видео в аудио, отключены до реализации проверенного API-контракта. Они не запускают платные запросы и не возвращают демонстрационные результаты. Список доступных моделей загружается через `/api/k0td-ai/models`.

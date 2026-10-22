@@ -1,0 +1,17 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 12MB
+	}
+	reverse_proxy web:3000 {
+		health_uri /api/health/live
+		health_interval 30s
+		stream_timeout 10m
+	}
+	# Access logs disabled: invitation URLs contain one-time credentials.
+}

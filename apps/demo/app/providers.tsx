@@ -6,14 +6,25 @@ import { useState } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 
-export const Providers = ({ children }: { children: React.ReactNode }) => {
+export const Providers = ({
+  children,
+  nonce,
+}: {
+  children: React.ReactNode;
+  nonce?: string;
+}) => {
   // Created once per client via useState's lazy initializer — no effect
   // needed, and each browser tab gets its own client.
   const [queryClient] = useState(() => new QueryClient());
   return (
     // Class-based theming (`.dark` on <html>), system by default — the
     // studio header's <StudioThemeSwitcher /> drives it.
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      nonce={nonce}
+    >
       <QueryClientProvider client={queryClient}>
         {children}
         {/* @two-71/studio surfaces its errors and confirmations through

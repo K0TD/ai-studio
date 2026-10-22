@@ -21,7 +21,9 @@ yarn-error.log*
 
 # env files
 .env
-.env*.local
+.env.*
+!.env.example
+!.env.docker.example
 
 # vercel
 .vercel
@@ -32,3 +34,8 @@ next-env.d.ts
 
 # trigger.dev local dev state
 .trigger/
+
+# Production credentials and operational data
+secrets/
+backups/
+restore/

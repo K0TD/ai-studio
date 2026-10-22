@@ -1,46 +1,8 @@
-import { deriveClientConfig } from "@two-71/studio";
-import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
-import {
-  ensureGuestUser,
-  GUEST_DAILY_LIMIT,
-  guestFromHeaders,
-} from "@/lib/guest";
-import { studioConfig } from "@/studio.config";
-
-import { StudioClient } from "./studio-client";
-
-// Account mode (uncomment to restore better-auth logins — see the matching
-// commented blocks in studio.config.ts and studio-client.tsx):
-// import { redirect } from "next/navigation";
-// import { auth } from "@/lib/auth";
+import { requirePageUser } from "@/lib/security/pages";
 
 export default async function StudioPage() {
-  // Account mode:
-  // const session = await auth.api.getSession({ headers: await headers() });
-  // if (!session) {
-  //   redirect("/login");
-  // }
-  // const user = session.user;
-
-  // Guest mode: identity comes from the request IP (lib/guest.ts) — no
-  // session, no redirect. The upsert here guarantees the user row exists
-  // before the first API call.
-  const guest = guestFromHeaders(await headers());
-  await ensureGuestUser(guest);
-
-  // deriveClientConfig strips workflow graphs and every provider/secret
-  // — this projection, not the full StudioConfig, is what's
-  // allowed to cross into the client tree.
-  const clientConfig = deriveClientConfig(studioConfig);
-
-  // GUEST_DAILY_LIMIT is env-driven and server-only; the welcome dialog quotes
-  // it, so it crosses as a prop rather than being hardcoded in the copy.
-  return (
-    <StudioClient
-      config={clientConfig}
-      dailyLimit={GUEST_DAILY_LIMIT}
-      user={guest}
-    />
-  );
+  await requirePageUser();
+  redirect("/");
 }

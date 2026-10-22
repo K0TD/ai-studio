@@ -1,9 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
     "plugins": [{ "name": "next" }],
     "jsx": "preserve",
-    "types": ["node"],
+    "types": ["node", "bun"],
     "paths": {
       "@/*": ["./*"]
     },

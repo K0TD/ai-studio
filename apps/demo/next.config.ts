@@ -1,6 +1,25 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  headers() {
+    return Promise.resolve([
+      {
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+          ...(process.env.NODE_ENV === "production"
+            ? [{ key: "Strict-Transport-Security", value: "max-age=31536000" }]
+            : []),
+        ],
+        source: "/:path*",
+      },
+    ]);
+  },
   // Allow next/image to serve generated media from the storage bucket.
   images: {
     // The package's gallery thumbnails request quality 60.
@@ -9,19 +28,7 @@ const nextConfig: NextConfig = {
       ? [{ hostname: new URL(process.env.R2_PUBLIC_URL).hostname }]
       : [],
   },
-  // Proxies Trigger.dev's realtime long-polls through this app's own domain
-  // instead of the browser talking to api.trigger.dev directly. Required
-  // because <Studio />'s generation-status components (@two-71/studio/client)
-  // read live progress via @trigger.dev/react-hooks against the realtime
-  // token @two-71/studio/server's routes issue.
-  rewrites() {
-    return [
-      {
-        destination: "https://api.trigger.dev/realtime/:path*",
-        source: "/api/realtime/:path*",
-      },
-    ];
-  },
+  poweredByHeader: false,
   // @resvg/resvg-js (used internally by the package's watermark step) is a
   // native module — it must load from node_modules at runtime, not be
   // bundled into the server output.

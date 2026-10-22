@@ -14,67 +14,107 @@
    switcher can override the system setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* shadcn-style CSS variable tokens. Consumed both by this app's own login
-   form and by the package's <Studio /> component tree
-   (bg-sidebar/bg-popover/bg-accent/bg-secondary etc.).
-
-   Theme follows next-themes (system by default, manual override via the
-   header's StudioThemeSwitcher). Both palettes mirror the pink-tinted
-   themes the package was designed against, hue-shifted to royal / Persian
-   blue: every tinted token keeps its lightness/chroma but swaps hue
-   ~320-350 (pink) for 262 (blue), and --studio-accent-* swaps the brand
-   gradient to blue. */
+/* ---------------------------------------------------------------------------
+   Syntx theme — warm cream surfaces, ink typography and a coral accent.
+   The tokens below keep the shadcn names used by @two-71/studio components
+   (so /studio keeps working) and add a dedicated --syntx-* set for the new
+   shell. Both palettes are tuned for AA contrast in light and dark modes.
+   --------------------------------------------------------------------------- */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0.008 262);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0.008 262);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0.008 262);
-  --border: oklch(0.922 0.005 262);
-  --input: oklch(0.922 0.005 262);
-  --ring: oklch(0.711 0.019 262);
-  --primary: oklch(0.525 0.223 262);
-  --primary-foreground: oklch(0.971 0.014 262);
-  --secondary: oklch(0.967 0.001 262);
-  --secondary-foreground: oklch(0.21 0.006 262);
-  --muted: oklch(0.96 0.003 262);
-  --muted-foreground: oklch(0.542 0.034 262);
-  --accent: oklch(0.525 0.223 262);
-  --accent-foreground: oklch(0.971 0.014 262);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --radius: 0.5rem;
+  --k0td-bg: #f3ede4;
+  --k0td-surface: #faf6ef;
+  --k0td-surface-solid: #fffcf7;
+  --k0td-line: #ded4c7;
+  --k0td-ink: #2b2621;
+  --k0td-muted: #857b70;
+  --k0td-accent: #f05138;
+  --k0td-accent-strong: #e24a33;
+  --k0td-glow: rgba(240, 81, 56, 0.16);
+  --k0td-shadow: 0 26px 70px -34px rgba(75, 52, 30, 0.45);
 
-  /* Studio brand gradient — royal / Persian blue (both themes). */
-  --studio-accent-from: oklch(0.62 0.17 262);
-  --studio-accent-to: oklch(0.51 0.23 265);
+  --syntx-bg: var(--k0td-bg);
+  --syntx-surface: var(--k0td-surface);
+  --syntx-surface-solid: var(--k0td-surface-solid);
+  --syntx-line: var(--k0td-line);
+  --syntx-ink: var(--k0td-ink);
+  --syntx-muted: var(--k0td-muted);
+  --syntx-accent: var(--k0td-accent);
+  --syntx-accent-strong: var(--k0td-accent-strong);
+  --syntx-glow: var(--k0td-glow);
+  --syntx-shadow: var(--k0td-shadow);
+
+  --background: var(--k0td-bg);
+  --foreground: var(--k0td-ink);
+  --card: var(--k0td-surface-solid);
+  --card-foreground: var(--k0td-ink);
+  --popover: var(--k0td-surface-solid);
+  --popover-foreground: var(--k0td-ink);
+  --border: var(--k0td-line);
+  --input: var(--k0td-line);
+  --ring: rgba(240, 81, 56, 0.45);
+  --primary: var(--k0td-accent);
+  --primary-foreground: #fffaf5;
+  --secondary: #ebe2d6;
+  --secondary-foreground: var(--k0td-ink);
+  --muted: #ece4d9;
+  --muted-foreground: var(--k0td-muted);
+  --accent: var(--k0td-accent);
+  --accent-foreground: #fffaf5;
+  --destructive: #d9483b;
+  --destructive-foreground: #fffaf5;
+  --sidebar: #f7f1e8;
+  --radius: 0.875rem;
+
+  /* Studio brand gradient — coral, matching the k0td accent. */
+  --studio-accent-from: #f86a4e;
+  --studio-accent-to: #e24a33;
   --studio-accent-highlight: rgba(255, 255, 255, 0.35);
   color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.145 0.008 262);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.212 0.019 262);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.212 0.019 262);
-  --popover-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.542 0.034 262);
-  --primary: oklch(0.459 0.187 262);
-  --primary-foreground: oklch(0.971 0.014 262);
-  --secondary: oklch(0.274 0.006 262);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.263 0.024 262);
-  --muted-foreground: oklch(0.711 0.019 262);
-  --accent: oklch(0.459 0.187 262);
-  --accent-foreground: oklch(0.971 0.014 262);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --sidebar: oklch(0.212 0.019 262);
+  --k0td-bg: #13110f;
+  --k0td-surface: #1d1a17;
+  --k0td-surface-solid: #24201c;
+  --k0td-line: #3a332d;
+  --k0td-ink: #f4eee6;
+  --k0td-muted: #a89d90;
+  --k0td-accent: #f4654c;
+  --k0td-accent-strong: #ff7a5e;
+  --k0td-glow: rgba(244, 101, 76, 0.18);
+  --k0td-shadow: 0 26px 70px -30px rgba(0, 0, 0, 0.8);
+
+  --syntx-bg: var(--k0td-bg);
+  --syntx-surface: var(--k0td-surface);
+  --syntx-surface-solid: var(--k0td-surface-solid);
+  --syntx-line: var(--k0td-line);
+  --syntx-ink: var(--k0td-ink);
+  --syntx-muted: var(--k0td-muted);
+  --syntx-accent: var(--k0td-accent);
+  --syntx-accent-strong: var(--k0td-accent-strong);
+  --syntx-glow: var(--k0td-glow);
+  --syntx-shadow: var(--k0td-shadow);
+
+  --background: var(--k0td-bg);
+  --foreground: var(--k0td-ink);
+  --card: var(--k0td-surface-solid);
+  --card-foreground: var(--k0td-ink);
+  --popover: var(--k0td-surface-solid);
+  --popover-foreground: var(--k0td-ink);
+  --border: var(--k0td-line);
+  --input: var(--k0td-line);
+  --ring: rgba(244, 101, 76, 0.5);
+  --primary: var(--k0td-accent);
+  --primary-foreground: #1a1512;
+  --secondary: #2b2621;
+  --secondary-foreground: var(--k0td-ink);
+  --muted: #28241f;
+  --muted-foreground: var(--k0td-muted);
+  --accent: var(--k0td-accent);
+  --accent-foreground: #1a1512;
+  --destructive: #e05a4c;
+  --destructive-foreground: #fffaf5;
+  --sidebar: #181512;
   color-scheme: dark;
 }
 
@@ -99,12 +139,211 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-sidebar: var(--sidebar);
+
+  --color-k0td-bg: var(--k0td-bg);
+  --color-k0td-surface: var(--k0td-surface);
+  --color-k0td-surface-solid: var(--k0td-surface-solid);
+  --color-k0td-line: var(--k0td-line);
+  --color-k0td-ink: var(--k0td-ink);
+  --color-k0td-muted: var(--k0td-muted);
+  --color-k0td-accent: var(--k0td-accent);
+  --color-k0td-accent-strong: var(--k0td-accent-strong);
+
+  --color-syntx-bg: var(--k0td-bg);
+  --color-syntx-surface: var(--k0td-surface);
+  --color-syntx-surface-solid: var(--k0td-surface-solid);
+  --color-syntx-line: var(--k0td-line);
+  --color-syntx-ink: var(--k0td-ink);
+  --color-syntx-muted: var(--k0td-muted);
+  --color-syntx-accent: var(--k0td-accent);
+  --color-syntx-accent-strong: var(--k0td-accent-strong);
+
+  --font-sans:
+    "Manrope", "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-display:
+    "Manrope", "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 }
 
+@keyframes k0td-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes k0td-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes syntx-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes syntx-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes syntx-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@layer utilities {
+  .animate-k0td-fade-up,
+  .animate-syntx-fade-up {
+    animation: k0td-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .animate-k0td-float,
+  .animate-syntx-float {
+    animation: k0td-float 6s ease-in-out infinite;
+  }
+
+  .k0td-no-scrollbar,
+  .syntx-no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .k0td-no-scrollbar::-webkit-scrollbar,
+  .syntx-no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .k0td-thin-scrollbar,
+  .syntx-thin-scrollbar {
+    scrollbar-color: color-mix(in oklab, var(--k0td-muted) 32%, transparent)
+      transparent;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .k0td-thin-scrollbar::-webkit-scrollbar,
+  .syntx-thin-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .k0td-thin-scrollbar::-webkit-scrollbar-track,
+  .syntx-thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .k0td-thin-scrollbar::-webkit-scrollbar-thumb,
+  .syntx-thin-scrollbar::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--k0td-muted) 32%, transparent);
+    border-radius: 999px;
+  }
+
+  .k0td-thin-scrollbar::-webkit-scrollbar-thumb:hover,
+  .syntx-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--k0td-muted) 52%, transparent);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
+  min-height: 100dvh;
   color: var(--foreground);
-  background-color: var(--background);
+  background-color: var(--syntx-bg);
+  background-image:
+    radial-gradient(
+      1100px 620px at 88% -8%,
+      var(--syntx-glow),
+      transparent 62%
+    ),
+    radial-gradient(
+      900px 520px at -6% 104%,
+      color-mix(in oklab, var(--syntx-accent) 7%, transparent),
+      transparent 58%
+    );
+  background-attachment: fixed;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  color: #fffaf5;
+  background: color-mix(in oklab, var(--syntx-accent) 80%, black 5%);
+}
+
+* {
+  scrollbar-color: color-mix(in oklab, var(--syntx-muted) 28%, transparent)
+    transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--syntx-muted) 30%, transparent);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--syntx-muted) 48%, transparent);
+  background-clip: content-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--syntx-accent) 62%, transparent);
+  outline-offset: 2px;
 }
