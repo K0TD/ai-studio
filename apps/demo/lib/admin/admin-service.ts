@@ -6,7 +6,9 @@ import { adminAudit, session, transactions, user } from "../db/schema";
 import { ApiError } from "../security/errors";
 import {
   CLOSED_PERMISSIONS,
+  DEFAULT_ADMIN_PERMISSIONS,
   DEFAULT_USER_PERMISSIONS,
+  DEFAULT_VIP_PERMISSIONS,
   permissionsSchema,
   roleSchema,
   rubSchema,
@@ -20,7 +22,7 @@ export const createUserSchema = z.strictObject({
   initialBalanceRub: rubSchema.default("0.00"),
   isApproved: z.boolean().default(true),
   name: z.string().trim().min(1).max(120),
-  permissions: permissionsSchema.default(DEFAULT_USER_PERMISSIONS),
+  permissions: permissionsSchema.optional(),
   role: roleSchema.default("user"),
 });
 export const updateAccessSchema = z
@@ -38,6 +40,13 @@ export const AdminService = {
       return await db.transaction(async (tx) => {
         await lockAdmin(tx, actorId);
         const id = crypto.randomUUID();
+        const effectivePermissions =
+          params.permissions ??
+          (params.role === "admin"
+            ? DEFAULT_ADMIN_PERMISSIONS
+            : params.role === "vip"
+            ? DEFAULT_VIP_PERMISSIONS
+            : DEFAULT_USER_PERMISSIONS);
         const [created] = await tx
           .insert(user)
           .values({
@@ -46,7 +55,7 @@ export const AdminService = {
             id,
             isApproved: params.isApproved,
             name: params.name,
-            permissions: params.permissions,
+            permissions: effectivePermissions,
             role: params.role,
           })
           .returning();

@@ -168,6 +168,11 @@ const PermissionFields = ({
     <fieldset className="grid gap-4 rounded-2xl border p-4">
       <legend className="px-2 text-sm font-semibold">Разрешения и доступ</legend>
 
+      {role === "admin" && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-relaxed text-red-700 dark:text-red-300">
+          🛡️ <strong>Роль Администратор:</strong> полный неограниченный доступ ко ВСЕМ разделам, моделям и функциям системы.
+        </div>
+      )}
       {role === "vip" && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
           👑 <strong>Роль VIP:</strong> по умолчанию пользователю открыты ВСЕ модели каталога во всех разделах.
@@ -311,7 +316,7 @@ const PermissionFields = ({
         </div>
 
         <span className="text-xs text-muted-foreground">
-          Для обычных пользователей бюджетные модели активны всегда. Выбор моделей здесь добавляет доступ к премиум-моделям. Для VIP все модели доступны по умолчанию.
+          Для обычных пользователей бюджетные модели активны всегда. Выбор моделей здесь добавляет доступ к премиум-моделям. Для VIP и администратора все модели доступны по умолчанию.
         </span>
       </div>
 

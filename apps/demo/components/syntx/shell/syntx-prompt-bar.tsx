@@ -487,7 +487,10 @@ export const SyntxPromptBar = ({
   const model = state.models.find(
     (candidate) => candidate.id === request?.modelId
   );
-  const allowed = !!request && modelAllowed(state.user, model);
+  const isVipOrAdmin =
+    state.user?.role === "vip" || state.user?.role === "admin";
+  const allowed =
+    !!request && (isVipOrAdmin || modelAllowed(state.user, model));
   useChatInitialization(request, allowed);
   const { quote, error, quoting } = useQuote(
     request,

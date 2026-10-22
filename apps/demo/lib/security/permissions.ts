@@ -23,6 +23,12 @@ export const DEFAULT_VIP_PERMISSIONS: UserPermissions = {
   modelIds: [],
   sections: ["video", "image", "audio"],
 };
+export const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
+  dailyLimitRub: null,
+  maxConcurrentJobs: 20,
+  modelIds: [],
+  sections: ["video", "image", "audio"],
+};
 export const CLOSED_PERMISSIONS: UserPermissions = {
   dailyLimitRub: "0.00",
   maxConcurrentJobs: 1,

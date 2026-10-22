@@ -117,8 +117,14 @@ export const SyntxHeader = ({
             {formatRub(balanceRub)}
           </button>
           {user?.role === "admin" && (
-            <Link href="/admin" className={icon} aria-label="Администрирование">
-              <Shield className="size-4" />
+            <Link
+              href="/admin"
+              title="Администратор: полный доступ ко всем моделям, разделам и настройкам"
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-semibold text-red-500 hover:bg-red-500/20 transition-colors"
+              aria-label="Панель администратора"
+            >
+              <Shield className="size-3.5" />
+              <span>Админ</span>
             </Link>
           )}
           {user?.role === "vip" && (

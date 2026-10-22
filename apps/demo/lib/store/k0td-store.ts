@@ -312,7 +312,9 @@ const catalogView = (catalog: ClientCatalog, account: StudioUser) => {
       .map((model) => ({
         ...model,
         disabledReason: !modelAllowed(account, model)
-          ? account?.role !== "vip" && !isBudgetModel(model)
+          ? account?.role !== "vip" &&
+            account?.role !== "admin" &&
+            !isBudgetModel(model)
             ? "vip_required"
             : "access_not_granted"
           : model.disabledReason,

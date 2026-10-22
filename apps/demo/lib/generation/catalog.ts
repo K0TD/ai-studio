@@ -297,13 +297,13 @@ export const permittedModel = (
   if (model.category === "llm") {
     return false;
   }
+  // VIP и Администратор: по умолчанию полный доступ ко всем разделам и моделям
+  if (account.role === "admin" || account.role === "vip") {
+    return true;
+  }
   const sections = account.permissions?.sections;
   if (sections && sections.length > 0 && !sections.includes(model.category)) {
     return false;
-  }
-  // VIP и Администратор: по умолчанию доступ ко всем моделям
-  if (account.role === "admin" || account.role === "vip") {
-    return true;
   }
   // Дополнительно выданные модели в permissions
   if (account.permissions?.modelIds?.includes(model.id)) {
