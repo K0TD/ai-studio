@@ -121,6 +121,22 @@ export const SyntxHeader = ({
               <Shield className="size-4" />
             </Link>
           )}
+          {user?.role === "vip" && (
+            <span
+              title="Статус VIP: открыты все модели каталога"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-500"
+            >
+              👑 VIP
+            </span>
+          )}
+          {user?.role === "user" && (
+            <span
+              title="Базовый тариф: доступны бюджетные модели"
+              className="hidden items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 sm:inline-flex"
+            >
+              Базовый
+            </span>
+          )}
           <span
             title={user?.email}
             className="mx-2 hidden max-w-32 truncate text-xs text-syntx-muted lg:inline"

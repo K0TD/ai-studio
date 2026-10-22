@@ -7,6 +7,7 @@ import { pool } from "@/lib/db";
 import { ApiError } from "@/lib/security/http";
 import type { AuthUser } from "@/lib/security/http";
 
+import { isBudgetModel } from "@/lib/routerai/models-catalog";
 import { requireModel, permittedModel, estimate } from "./catalog";
 import {
   normalizedSettings,
@@ -34,11 +35,28 @@ export const assertAccountAccess = (
       "GENERATION_FORBIDDEN"
     );
   }
-  if (
-    !account.permissions.sections.includes(tab) ||
-    !account.permissions.modelIds.includes(modelId)
-  ) {
-    throw new ApiError(403, "Доступ к модели закрыт", "MODEL_FORBIDDEN");
+  const sectionAllowed =
+    account.role === "admin" ||
+    account.role === "vip" ||
+    !account.permissions?.sections?.length ||
+    account.permissions.sections.includes(tab);
+  if (!sectionAllowed) {
+    throw new ApiError(403, "Доступ к разделу закрыт", "SECTION_FORBIDDEN");
+  }
+
+  const modelAllowed =
+    account.role === "admin" ||
+    account.role === "vip" ||
+    account.permissions?.modelIds?.includes(modelId) ||
+    isBudgetModel(modelId);
+  if (!modelAllowed) {
+    throw new ApiError(
+      403,
+      account.role === "user"
+        ? "Эта модель доступна только для тарифа VIP"
+        : "Доступ к модели закрыт",
+      "VIP_REQUIRED"
+    );
   }
 };
 

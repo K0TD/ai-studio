@@ -5,6 +5,7 @@ import {
   VIDEO_MODELS,
   IMAGE_MODELS,
   AUDIO_MODELS,
+  isBudgetModel,
 } from "@/lib/routerai/models-catalog";
 import { providerModelSchema } from "@/lib/routerai/responses";
 import type { ProviderModel } from "@/lib/routerai/responses";
@@ -291,11 +292,26 @@ export const catalogModels = async (
 
 export const permittedModel = (
   account: Pick<AuthUser, "permissions" | "role">,
-  model: CatalogModel
-): boolean =>
-  model.category !== "llm" &&
-  account.permissions.sections.includes(model.category) &&
-  account.permissions.modelIds.includes(model.id);
+  model: CatalogModel | ModelMetadata
+): boolean => {
+  if (model.category === "llm") {
+    return false;
+  }
+  const sections = account.permissions?.sections;
+  if (sections && sections.length > 0 && !sections.includes(model.category)) {
+    return false;
+  }
+  // VIP и Администратор: по умолчанию доступ ко всем моделям
+  if (account.role === "admin" || account.role === "vip") {
+    return true;
+  }
+  // Дополнительно выданные модели в permissions
+  if (account.permissions?.modelIds?.includes(model.id)) {
+    return true;
+  }
+  // Обычный пользователь: по умолчанию бюджетные модели
+  return isBudgetModel(model);
+};
 
 export const requireModel = async (
   account: AuthUser,
@@ -306,8 +322,17 @@ export const requireModel = async (
   const model = queryResult3.find(
     (m) => m.id === modelId && m.category === tab
   );
-  if (!model || !permittedModel(account, model)) {
-    throw new ApiError(403, "Доступ к модели закрыт", "MODEL_FORBIDDEN");
+  if (!model) {
+    throw new ApiError(404, "Модель не найдена", "MODEL_NOT_FOUND");
+  }
+  if (!permittedModel(account, model)) {
+    throw new ApiError(
+      403,
+      account.role === "user" && !isBudgetModel(model)
+        ? "Эта модель доступна только для тарифа VIP"
+        : "Доступ к модели закрыт",
+      "VIP_REQUIRED"
+    );
   }
   if (!model.enabled) {
     throw new ApiError(

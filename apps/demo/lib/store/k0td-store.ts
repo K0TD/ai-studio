@@ -17,6 +17,7 @@ import {
   jobsResponseSchema,
   okResponseSchema,
 } from "./client-contracts";
+import { isBudgetModel } from "../routerai/models-catalog";
 import { modelAllowed, sectionAllowed } from "./client-policy";
 export type K0tdTab = SyntxTab;
 export interface AvatarProfile {
@@ -310,9 +311,11 @@ const catalogView = (catalog: ClientCatalog, account: StudioUser) => {
       )
       .map((model) => ({
         ...model,
-        disabledReason: modelAllowed(account, model)
-          ? model.disabledReason
-          : "access_not_granted",
+        disabledReason: !modelAllowed(account, model)
+          ? account?.role !== "vip" && !isBudgetModel(model)
+            ? "vip_required"
+            : "access_not_granted"
+          : model.disabledReason,
       })),
   };
 };

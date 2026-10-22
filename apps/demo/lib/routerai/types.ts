@@ -66,6 +66,8 @@ export interface ModelMetadata {
   familyId?: string;
   familyName?: string;
   badge?: string;
+  isBudget?: boolean;
+  tier?: "budget" | "vip";
   supportedAspectRatios?: string[];
   supportedResolutions?: string[];
   supportedDurations?: number[];

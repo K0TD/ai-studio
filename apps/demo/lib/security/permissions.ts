@@ -11,9 +11,22 @@ export const permissionsSchema = z.strictObject({
 });
 export type UserPermissions = z.infer<typeof permissionsSchema>;
 export type UserRole = z.infer<typeof roleSchema>;
+export const DEFAULT_USER_PERMISSIONS: UserPermissions = {
+  dailyLimitRub: null,
+  maxConcurrentJobs: 3,
+  modelIds: [],
+  sections: ["video", "image", "audio"],
+};
+export const DEFAULT_VIP_PERMISSIONS: UserPermissions = {
+  dailyLimitRub: null,
+  maxConcurrentJobs: 10,
+  modelIds: [],
+  sections: ["video", "image", "audio"],
+};
 export const CLOSED_PERMISSIONS: UserPermissions = {
   dailyLimitRub: "0.00",
   maxConcurrentJobs: 1,
   modelIds: [],
   sections: [],
 };
+

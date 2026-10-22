@@ -1,3 +1,4 @@
+import { isBudgetModel } from "../routerai/models-catalog";
 import type { ModelMetadata } from "../routerai/types";
 export const safeCallbackUrl = (value?: string): string => {
   if (
@@ -27,8 +28,8 @@ export const sectionAllowed = (
     role: string;
     isApproved: boolean;
     isBanned: boolean;
-    permissions: {
-      sections: string[];
+    permissions?: {
+      sections?: string[];
     };
   } | null,
   section: string
@@ -37,25 +38,41 @@ export const sectionAllowed = (
     account &&
     !account.isBanned &&
     account.isApproved &&
-    account.permissions.sections.includes(section)
+    (account.role === "admin" ||
+     account.role === "vip" ||
+     !account.permissions?.sections ||
+     account.permissions.sections.length === 0 ||
+     account.permissions.sections.includes(section))
   );
 export const modelAllowed = (
   account: {
     role: string;
     isApproved: boolean;
     isBanned: boolean;
-    permissions: {
-      sections: string[];
-      modelIds: string[];
+    permissions?: {
+      sections?: string[];
+      modelIds?: string[];
     };
   } | null,
   model?: ModelMetadata
-): boolean =>
-  Boolean(
-    model &&
-    sectionAllowed(account, model.category) &&
-    account?.permissions.modelIds.includes(model.id)
-  );
+): boolean => {
+  if (!model || !account || account.isBanned || !account.isApproved) {
+    return false;
+  }
+  if (!sectionAllowed(account, model.category)) {
+    return false;
+  }
+  // VIP и Администратор: все модели доступны по умолчанию
+  if (account.role === "admin" || account.role === "vip") {
+    return true;
+  }
+  // Индивидуально открытые модели в permissions
+  if (account.permissions?.modelIds?.includes(model.id)) {
+    return true;
+  }
+  // Обычный пользователь: по умолчанию доступны бюджетные модели
+  return isBudgetModel(model);
+};
 export const validQuote = (
   quote: {
     expiresAt: string;
@@ -86,6 +103,7 @@ export const disabledModelReason = (reason?: string): string =>
     model_unavailable: "Модель отсутствует у провайдера",
     unsupported_pricing: "Провайдер не подтвердил подходящий тариф",
     unsupported_provider_capability: "Возможность пока не подключена",
+    vip_required: "Доступно только для тарифа VIP",
   })[reason ?? ""] ?? "Модель временно недоступна";
 export const normalizeRubInput = (value: string): string => {
   const match = value.trim().match(/^(-?)(\d{1,10})(?:\.(\d{1,2}))?$/u);

@@ -13,8 +13,7 @@ export const ModelAvailability = ({
     <section className="rounded-xl border bg-muted/30 p-4 text-sm">
       <h2 className="font-medium">Недоступные модели</h2>
       <p className="mt-2 text-xs text-muted-foreground">
-        Доступ и баланс изменяет администратор. Запуск возможен только с
-        подтвержденным тарифом.
+        Для VIP-пользователей доступны все модели каталога. Для базового тарифа открыты бюджетные версии. Для расширения доступа обратитесь к администратору.
       </p>
       {models.length > 0 && (
         <ul className="mt-3 space-y-3">

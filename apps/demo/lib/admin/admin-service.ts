@@ -6,6 +6,7 @@ import { adminAudit, session, transactions, user } from "../db/schema";
 import { ApiError } from "../security/errors";
 import {
   CLOSED_PERMISSIONS,
+  DEFAULT_USER_PERMISSIONS,
   permissionsSchema,
   roleSchema,
   rubSchema,
@@ -19,7 +20,7 @@ export const createUserSchema = z.strictObject({
   initialBalanceRub: rubSchema.default("0.00"),
   isApproved: z.boolean().default(true),
   name: z.string().trim().min(1).max(120),
-  permissions: permissionsSchema.default(CLOSED_PERMISSIONS),
+  permissions: permissionsSchema.default(DEFAULT_USER_PERMISSIONS),
   role: roleSchema.default("user"),
 });
 export const updateAccessSchema = z

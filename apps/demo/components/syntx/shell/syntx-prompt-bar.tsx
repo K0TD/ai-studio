@@ -360,7 +360,7 @@ const QuoteSummary = ({
 }) => {
   let message = "Стоимость появится после ввода промпта";
   if (!allowed) {
-    message = "Нет доступа к выбранной модели. Обратитесь к администратору.";
+    message = "👑 Для этой модели требуется статус VIP. Переключитесь на бюджетную модель или обратитесь к администратору.";
   } else if (error) {
     message = error;
   } else if (quote && Number(available) < Number(quote.maxCostRub)) {

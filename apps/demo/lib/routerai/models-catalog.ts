@@ -1529,3 +1529,69 @@ export const findAudioFamily = (familyId?: string): ModelFamily => {
     AUDIO_FAMILIES[0]
   );
 };
+
+// ============================================================================
+// 6. БЮДЖЕТНЫЕ И VIP МОДЕЛИ (Концепция доступа)
+// ============================================================================
+
+export const BUDGET_MODEL_IDS: readonly string[] = [
+  // Видео (бюджетные / lite / turbo / экономичные версии)
+  "alibaba/wan-2.1",
+  "alibaba/wan-3.0",
+  "x-ai/grok-imagine-video-1.5-lite",
+  "runway/gen-3-alpha-turbo",
+  "minimax/video-01-live",
+  "google/veo-3.1-lite",
+  "kwaivgi/kling-v1.6-pro",
+  "bytedance/seedance-1.5-pro",
+  "heygen/lipsync-express",
+  "luma/dream-machine",
+
+  // Графика (бюджетные версии)
+  "google/gemini-3.1-flash-image-preview",
+  "openai/gpt-image-1",
+  "openai/dall-e-3",
+  "black-forest-labs/flux-1-schnell",
+  "black-forest-labs/flux-1-dev",
+  "bytedance-seed/seedream-4.0",
+  "recraft/recraft-v3",
+  "stabilityai/stable-diffusion-3.5-turbo",
+
+  // Аудио (бюджетные версии)
+  "elevenlabs/eleven-flash-v2",
+  "elevenlabs/eleven-turbo-v2.5",
+  "suno/suno-v3.5",
+  "mistralai/voxtral-mini-tts-3-0",
+  "mistralai/voxtral-mini-transcribe-3-0",
+  "x-ai/grok-voice-tts-1.0",
+];
+
+export const isBudgetModel = (
+  modelOrId?: ModelMetadata | { id: string } | string | null
+): boolean => {
+  if (!modelOrId) {
+    return false;
+  }
+  const id = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
+  return BUDGET_MODEL_IDS.includes(id);
+};
+
+export const isVipModel = (
+  modelOrId?: ModelMetadata | { id: string } | string | null
+): boolean => {
+  return !isBudgetModel(modelOrId);
+};
+
+export const getFamilyModels = (family: ModelFamily): ModelMetadata[] =>
+  family.models.map((m) => ({
+    ...m,
+    isBudget: isBudgetModel(m.id),
+    tier: isBudgetModel(m.id) ? "budget" : "vip",
+  }));
+
+export const getBudgetModelsForFamily = (family: ModelFamily): ModelMetadata[] =>
+  family.models.filter((m) => isBudgetModel(m.id));
+
+export const getVipModelsForFamily = (family: ModelFamily): ModelMetadata[] =>
+  family.models.filter((m) => !isBudgetModel(m.id));
+

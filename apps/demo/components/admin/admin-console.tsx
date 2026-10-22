@@ -1,5 +1,5 @@
 "use client";
-import { Plus, RefreshCw, Shield, Users, Wallet } from "lucide-react";
+import { Plus, RefreshCw, Search, Shield, Users, Wallet, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import type { SystemStats } from "@/lib/admin/types";
 import { authClient } from "@/lib/auth-client";
+import { isBudgetModel } from "@/lib/routerai/models-catalog";
 import { roleSchema } from "@/lib/security/permissions";
 import {
   adminUsersResponseSchema,
@@ -78,9 +79,9 @@ const rub = (value: string | number | undefined) =>
   `${Number(value ?? 0).toLocaleString("ru-RU", { maximumFractionDigits: 2, minimumFractionDigits: 2 })} ₽`;
 const defaults: Permissions = {
   dailyLimitRub: null,
-  maxConcurrentJobs: 1,
+  maxConcurrentJobs: 2,
   modelIds: [],
-  sections: [],
+  sections: ["video", "image", "audio"],
 };
 const labels = {
   audio: "Аудио",
@@ -117,6 +118,7 @@ const PermissionFields = ({
   value,
   onChange,
   models,
+  role,
 }: {
   value: Permissions;
   onChange: (p: Permissions) => void;
@@ -124,86 +126,227 @@ const PermissionFields = ({
     id: string;
     name: string;
   }[];
-}) => (
-  <fieldset className="grid gap-4 rounded-2xl border p-4">
-    <legend className="px-2 text-sm font-semibold">Разрешения</legend>
-    <div className="flex flex-wrap gap-4">
-      {(["video", "image", "audio"] as const).map((section) => (
-        <label key={section} className="flex items-center gap-2 text-sm">
+  role?: "user" | "vip" | "admin";
+}) => {
+  const [search, setSearch] = useState("");
+
+  const filteredModels = models.filter((model) => {
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (
+        model.name.toLowerCase().includes(q) ||
+        model.id.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const toggleModel = (id: string) => {
+    const next = value.modelIds.includes(id)
+      ? value.modelIds.filter((m) => m !== id)
+      : [...value.modelIds, id];
+    onChange({ ...value, modelIds: next });
+  };
+
+  const selectAllFiltered = () => {
+    const toAdd = filteredModels.map((m) => m.id);
+    const combined = Array.from(new Set([...value.modelIds, ...toAdd]));
+    onChange({ ...value, modelIds: combined });
+  };
+
+  const selectAllVip = () => {
+    const vipIds = models.filter((m) => !isBudgetModel(m.id)).map((m) => m.id);
+    const combined = Array.from(new Set([...value.modelIds, ...vipIds]));
+    onChange({ ...value, modelIds: combined });
+  };
+
+  const deselectAll = () => {
+    onChange({ ...value, modelIds: [] });
+  };
+
+  return (
+    <fieldset className="grid gap-4 rounded-2xl border p-4">
+      <legend className="px-2 text-sm font-semibold">Разрешения и доступ</legend>
+
+      {role === "vip" && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+          👑 <strong>Роль VIP:</strong> по умолчанию пользователю открыты ВСЕ модели каталога во всех разделах.
+        </div>
+      )}
+      {role === "user" && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs leading-relaxed text-emerald-700 dark:text-emerald-300">
+          ✨ <strong>Пользователь (базовый):</strong> по умолчанию открыты все бюджетные модели. Выбор моделей ниже дает дополнительный доступ к выбранным VIP-моделям.
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-4">
+        {(["video", "image", "audio"] as const).map((section) => (
+          <label key={section} className="flex items-center gap-2 text-sm cursor-pointer font-medium">
+            <input
+              type="checkbox"
+              className="rounded border-border accent-[#f05138]"
+              checked={value.sections.includes(section)}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  sections: e.target.checked
+                    ? [...value.sections, section]
+                    : value.sections.filter((s) => s !== section),
+                })
+              }
+            />
+            {labels[section]}
+          </label>
+        ))}
+      </div>
+
+      <div className="grid gap-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium">
+            Дополнительно разрешенные VIP-модели
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Выбрано: <strong className="text-foreground">{value.modelIds.length}</strong> из {models.length}
+          </span>
+        </div>
+
+        {/* Поиск и быстрые кнопки выбора */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              className={`${input} pl-8 py-1.5 text-xs`}
+              placeholder="Поиск по названию или ID модели..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setSearch("")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-muted transition-colors"
+              onClick={selectAllFiltered}
+            >
+              {search ? "Выбрать найденные" : "Выбрать все"}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 px-2.5 py-1 text-xs font-medium hover:bg-amber-500/20 transition-colors"
+              onClick={selectAllVip}
+            >
+              👑 Все VIP
+            </button>
+            {value.modelIds.length > 0 && (
+              <button
+                type="button"
+                className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                onClick={deselectAll}
+              >
+                Снять выбор
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Интерактивный список с множественным выбором чекбоксами (без Ctrl) */}
+        <div className="max-h-56 overflow-y-auto space-y-1 rounded-xl border border-border bg-background/50 p-2">
+          {filteredModels.length === 0 ? (
+            <div className="py-6 text-center text-xs text-muted-foreground">
+              Модели не найдены
+            </div>
+          ) : (
+            filteredModels.map((model) => {
+              const isSelected = value.modelIds.includes(model.id);
+              const isBudget = isBudgetModel(model.id);
+
+              return (
+                <label
+                  key={model.id}
+                  className={`flex items-center justify-between gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-[#f05138]/10 text-foreground"
+                      : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      className="rounded border-border accent-[#f05138] h-4 w-4 flex-shrink-0 cursor-pointer"
+                      checked={isSelected}
+                      onChange={() => toggleModel(model.id)}
+                    />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs font-medium truncate text-foreground">
+                        {model.name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-mono truncate">
+                        {model.id}
+                      </span>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                      isBudget
+                        ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        : "border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {isBudget ? "Бюджетная" : "👑 VIP"}
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+
+        <span className="text-xs text-muted-foreground">
+          Для обычных пользователей бюджетные модели активны всегда. Выбор моделей здесь добавляет доступ к премиум-моделям. Для VIP все модели доступны по умолчанию.
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="grid gap-2 text-sm">
+          Лимит расходов в сутки, ₽
           <input
-            type="checkbox"
-            checked={value.sections.includes(section)}
+            className={input}
+            inputMode="decimal"
+            placeholder="Без лимита"
+            pattern="[0-9]+([.][0-9]{1,2})?"
+            value={value.dailyLimitRub ?? ""}
             onChange={(e) =>
-              onChange({
-                ...value,
-                sections: e.target.checked
-                  ? [...value.sections, section]
-                  : value.sections.filter((s) => s !== section),
-              })
+              onChange({ ...value, dailyLimitRub: e.target.value || null })
             }
           />
-          {labels[section]}
         </label>
-      ))}
-    </div>
-    <label className="grid gap-2 text-sm">
-      Разрешенные модели
-      <select
-        multiple
-        className={`${input} min-h-36`}
-        value={value.modelIds}
-        onChange={(e) =>
-          onChange({
-            ...value,
-            modelIds: Array.from(
-              e.target.selectedOptions,
-              (option) => option.value
-            ),
-          })
-        }
-      >
-        {models.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.name}
-          </option>
-        ))}
-      </select>
-      <span className="text-xs text-muted-foreground">
-        Пустой список не дает доступ к моделям. Для выбора нескольких
-        используйте Ctrl / ⌘.
-      </span>
-    </label>
-    <div className="grid grid-cols-2 gap-3">
-      <label className="grid gap-2 text-sm">
-        Лимит расходов в сутки, ₽
-        <input
-          className={input}
-          inputMode="decimal"
-          placeholder="Без лимита"
-          pattern="[0-9]+([.][0-9]{1,2})?"
-          value={value.dailyLimitRub ?? ""}
-          onChange={(e) =>
-            onChange({ ...value, dailyLimitRub: e.target.value || null })
-          }
-        />
-      </label>
-      <label className="grid gap-2 text-sm">
-        Параллельных заданий
-        <input
-          className={input}
-          type="number"
-          min={1}
-          max={20}
-          required
-          value={value.maxConcurrentJobs}
-          onChange={(e) =>
-            onChange({ ...value, maxConcurrentJobs: Number(e.target.value) })
-          }
-        />
-      </label>
-    </div>
-  </fieldset>
-);
+        <label className="grid gap-2 text-sm">
+          Параллельных заданий
+          <input
+            className={input}
+            type="number"
+            min={1}
+            max={20}
+            required
+            value={value.maxConcurrentJobs}
+            onChange={(e) =>
+              onChange({ ...value, maxConcurrentJobs: Number(e.target.value) })
+            }
+          />
+        </label>
+      </div>
+    </fieldset>
+  );
+};
 const Reason = ({
   value,
   onChange,
@@ -574,6 +717,7 @@ export const AdminConsole = () => {
           <PermissionFields
             value={form.permissions}
             models={models}
+            role={form.role}
             onChange={(permissions) => setForm({ ...form, permissions })}
           />
           {editing !== "new" && <Reason value={reason} onChange={setReason} />}

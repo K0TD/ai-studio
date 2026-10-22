@@ -14,6 +14,7 @@ import { limitedBody } from "@/lib/routerai/client";
 import {
   ELEVENLABS_VOICES,
   SUNO_STYLE_PRESETS,
+  isBudgetModel,
 } from "@/lib/routerai/models-catalog";
 import {
   apiRoute,
@@ -96,17 +97,21 @@ export const modelsGet = apiRoute(async (request) => {
   const user = await requireUser(request);
   await rateLimit(`models:${user.id}`, 30, 60);
   const queryResult1 = await catalogModels();
-  const models = queryResult1
-    .filter((m) => user.role === "admin" || permittedModel(user, m))
-    .map(({ raw: _raw, ...model }) => ({
+  const models = queryResult1.map(({ raw: _raw, ...model }) => {
+    const isBudget = isBudgetModel(model);
+    const permitted = permittedModel(user, model);
+    return {
       ...model,
       canGenerate:
         user.isApproved &&
         model.enabled &&
         model.category !== "llm" &&
-        user.permissions.sections.includes(model.category) &&
-        user.permissions.modelIds.includes(model.id),
-    }));
+        permitted,
+      isBudget,
+      isVipOnly: !isBudget,
+      tier: isBudget ? ("budget" as const) : ("vip" as const),
+    };
+  });
   return Response.json({
     audio: models.filter((m) => m.category === "audio"),
     elevenlabsVoices: ELEVENLABS_VOICES,
