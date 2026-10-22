@@ -13,6 +13,7 @@ import { allowAllModeration, r2Storage } from "@two-71/studio";
 import type {
   AuthAdapter,
   BillingProvider,
+  DbClient,
   StudioConfig,
   StudioModel,
   VideoModelSpec,
@@ -185,7 +186,7 @@ export const studioConfig: StudioConfig = {
   branding: {
     siteName: "2.71",
   },
-  db: studioDb,
+  db: studioDb as unknown as DbClient,
   models: [krea2],
   moderation: allowAllModeration,
   prompts,

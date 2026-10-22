@@ -4,6 +4,7 @@ import { username } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 
 import { db, isPostgres } from "@/lib/db";
+import { user } from "@/lib/db/active-schema";
 // biome-ignore lint/performance/noNamespaceImport: drizzleAdapter needs the full schema namespace to resolve tables
 import * as pgSchema from "@/lib/db/schema";
 import * as sqliteSchema from "@/lib/db/sqlite-schema";
@@ -32,21 +33,20 @@ const getTrustedOrigins = () => {
 };
 
 const createAuth = () => {
-  const schema = isPostgres ? pgSchema : sqliteSchema;
   return betterAuth({
     advanced: { ipAddress: { ipAddressHeaders: ["x-forwarded-for"] } },
     baseURL: getBaseURL(),
     database: isPostgres
       ? drizzleAdapter(db, { provider: "pg", schema: pgSchema })
-      : drizzleAdapter(db, { provider: "sqlite", schema: sqliteSchema }),
+      : drizzleAdapter(db as any, { provider: "sqlite", schema: sqliteSchema }),
     databaseHooks: {
       session: {
         create: {
           before: async (candidate) => {
             const [account] = await db
               .select()
-              .from(schema.user)
-              .where(eq(schema.user.id, candidate.userId));
+              .from(user)
+              .where(eq(user.id, candidate.userId));
             if (
               !account ||
               account.isBanned ||
