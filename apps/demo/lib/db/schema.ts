@@ -19,7 +19,7 @@ import {
 // spread in via createGenerationTable's factory so its userId FK points at
 // this app's own `user` table.
 import type { AdminAuditDetails } from "../admin/types";
-import { CLOSED_PERMISSIONS } from "../security/permissions";
+import { DEFAULT_USER_PERMISSIONS } from "../security/permissions";
 import type { UserPermissions, UserRole } from "../security/permissions";
 export * from "../generation/schema";
 export const user = pgTable(
@@ -41,7 +41,7 @@ export const user = pgTable(
     name: text("name").notNull(),
     permissions: jsonb("permissions")
       .$type<UserPermissions>()
-      .default(CLOSED_PERMISSIONS)
+      .default(DEFAULT_USER_PERMISSIONS)
       .notNull(),
     reservedRub: numeric("reserved_rub", { precision: 12, scale: 2 })
       .default("0.00")

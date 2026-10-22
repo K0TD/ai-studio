@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { auth } from "../auth";
 import { db } from "../db";
-import { user } from "../db/schema";
+import { user } from "../db/active-schema";
 import { ApiError } from "./errors";
 import { assertSameOrigin } from "./request";
 export { ApiError } from "./errors";
@@ -21,7 +21,7 @@ export const requireUser = async (request: Request): Promise<AuthUser> => {
     .select()
     .from(user)
     .where(eq(user.id, session.user.id));
-  if (!account || account.isBanned || !account.activatedAt) {
+  if (!account || account.isBanned || (!account.activatedAt && !account.isEnvAdmin)) {
     throw new ApiError(403, "Доступ к аккаунту закрыт", "ACCOUNT_DISABLED");
   }
   return account;
@@ -54,11 +54,16 @@ export const apiRoute =
     } catch (error) {
       const knownError = error instanceof ApiError;
       const status = knownError ? error.status : 500;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
       console.error(
         JSON.stringify({
+          error: errorMessage,
           event: "api.rejected",
           path: new URL(request.url).pathname,
           requestId,
+          stack: errorStack,
           status,
         })
       );
@@ -72,7 +77,7 @@ export const apiRoute =
       return Response.json(
         {
           code: knownError ? error.code : "INTERNAL_ERROR",
-          error: knownError ? error.message : "Не удалось выполнить запрос",
+          error: knownError ? error.message : errorMessage,
           requestId,
         },
         {

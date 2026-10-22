@@ -27,10 +27,6 @@ const tabs: {
   { id: "video", label: "Видео", working: true },
   { id: "image", label: "Изображения", working: true },
   { id: "audio", label: "Аудио", working: true },
-  { id: "trends", label: "Тренды", working: false },
-  { id: "agents", label: "Агенты", working: false },
-  { id: "llm", label: "LLM-студия", working: false },
-  { id: "editor", label: "Редактор", working: false },
 ];
 export const SyntxHeader = ({
   onOpenSidebar,

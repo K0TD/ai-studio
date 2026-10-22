@@ -9,7 +9,7 @@
 Полная инструкция развертывания VPS, обновлений, резервирования и восстановления: [docs/production.md](docs/production.md).
 
 ```sh
-cp .env.docker.example .env
+cp .env.example .env
 chmod 600 .env
 # Заполните все обязательные значения, настройте DNS и внешние резервные копии.
 docker compose --env-file .env config -q

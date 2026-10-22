@@ -360,12 +360,11 @@ const Reason = ({
   onChange: (value: string) => void;
 }) => (
   <label className="grid gap-2 text-sm">
-    Причина изменения
+    Комментарий (необязательно)
     <textarea
       className={input}
-      required
-      minLength={5}
       maxLength={500}
+      placeholder="Укажите комментарий при необходимости..."
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -854,7 +853,6 @@ export const AdminConsole = () => {
                 className={button}
                 disabled={
                   busy ||
-                  reason.trim().length < 5 ||
                   (action === "settle" &&
                     !/^[0-9]+(\.[0-9]{1,2})?$/u.test(settleCost))
                 }

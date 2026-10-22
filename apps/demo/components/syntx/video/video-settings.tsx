@@ -159,28 +159,6 @@ export const VideoSettingsPanel = () => {
           </select>
         </label>
 
-        {/* Бейджи и информация о тарифе */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-          {selectedFamily.badge && (
-            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {selectedFamily.badge}
-            </span>
-          )}
-          {selectedModel.badge && (
-            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {selectedModel.badge}
-            </span>
-          )}
-          {isBudgetModel(selectedModel) ? (
-            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-              Бюджетная · {selectedModel.basePriceRub} ₽/сек
-            </span>
-          ) : (
-            <span className="rounded-md border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
-              👑 VIP · {selectedModel.basePriceRub} ₽/сек
-            </span>
-          )}
-        </div>
 
         {/* Предупреждение для пользователя, если выбрана VIP-модель на базовом тарифе */}
         {!isAllowed && (
@@ -269,24 +247,8 @@ export const VideoSettingsPanel = () => {
             />
           </div>
           {selectedModel.supportedDurations && selectedModel.supportedDurations.length > 1 && (
-            <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-muted-foreground">
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
               <span>{Math.min(...selectedModel.supportedDurations)} сек</span>
-              <div className="flex flex-wrap gap-1">
-                {selectedModel.supportedDurations.map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => updateVideoSettings({ duration: d })}
-                    className={`rounded px-1.5 py-0.5 transition-colors ${
-                      videoSettings.duration === d
-                        ? "bg-[#f05138]/10 font-bold text-[#f05138]"
-                        : "hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    {d}с
-                  </button>
-                ))}
-              </div>
               <span>{Math.max(...selectedModel.supportedDurations)} сек</span>
             </div>
           )}

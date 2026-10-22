@@ -2,7 +2,7 @@ import { count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, pool } from "../db";
-import { adminAudit, session, transactions, user } from "../db/schema";
+import { adminAudit, session, transactions, user } from "../db/active-schema";
 import { ApiError } from "../security/errors";
 import {
   CLOSED_PERMISSIONS,
@@ -30,7 +30,7 @@ export const updateAccessSchema = z
     isApproved: z.boolean().optional(),
     isBanned: z.boolean().optional(),
     permissions: permissionsSchema.optional(),
-    reason: z.string().trim().min(1).max(500),
+    reason: z.string().trim().max(500).optional().default(""),
     role: roleSchema.optional(),
   })
   .refine((change) => Object.keys(change).some((key) => key !== "reason"));
@@ -221,7 +221,7 @@ export const AdminService = {
             permissions: target.permissions,
             role: target.role,
           },
-          reason,
+          reason: reason || "Изменение параметров доступа",
         },
         id: crypto.randomUUID(),
         targetId,

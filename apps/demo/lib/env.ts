@@ -20,9 +20,11 @@ const runtimeSchema = z.object({
       !parsed.password
     );
   }),
-  DATABASE_URL: z.url().refine((url) => /^postgres(ql)?:/u.test(url)),
+  DATABASE_URL: z.string().optional(),
   MEDIA_ROOT: z.string().refine(isAbsolute),
   ROUTERAI_API_KEY: z.string().min(8),
+  SQLITE_PATH: z.string().optional(),
+  STORAGE_ROOT: z.string().optional(),
 });
 export const validateRuntimeEnv = () => {
   const parsed = runtimeSchema.safeParse(process.env);

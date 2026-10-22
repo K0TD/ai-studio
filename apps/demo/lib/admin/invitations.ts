@@ -3,8 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { and, eq, gt } from "drizzle-orm";
 
-import { db } from "../db";
-import { account, adminAudit, invitation, session, user } from "../db/schema";
+import { db, isPostgres } from "../db";
+import { account, adminAudit, invitation, session, user } from "../db/active-schema";
 import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import { lockAdminUsers } from "./authorization";
@@ -62,12 +62,15 @@ export const activateAccount = async (
   }
   const passwordHash = await hashPassword(password);
   await db.transaction(async (tx) => {
-    const [target] = await tx
+    const targetQuery = tx
       .select()
       .from(user)
-      .where(eq(user.id, candidate.userId))
-      .for("update");
-    const [valid] = await tx
+      .where(eq(user.id, candidate.userId));
+    const [target] = isPostgres
+      ? await (targetQuery as any).for("update")
+      : await targetQuery;
+
+    const validQuery = tx
       .select()
       .from(invitation)
       .where(
@@ -75,8 +78,10 @@ export const activateAccount = async (
           eq(invitation.tokenHash, tokenHash),
           gt(invitation.expiresAt, new Date())
         )
-      )
-      .for("update");
+      );
+    const [valid] = isPostgres
+      ? await (validQuery as any).for("update")
+      : await validQuery;
     if (!valid || !target || target.isBanned || target.isEnvAdmin) {
       throw new ApiError(400, "Ссылка недействительна или истекла");
     }

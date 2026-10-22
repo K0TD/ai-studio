@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:auto-migrate": "bun scripts/auto-migrate.ts",
     "worker": "bun scripts/worker.ts",
     "sync-admin": "bun scripts/sync-admin.ts",
     "preflight": "bun scripts/preflight.ts"

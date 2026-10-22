@@ -15,10 +15,11 @@ FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b4
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 MEDIA_ROOT=/data/media BUN_RUNTIME_TRANSPILER_CACHE_PATH=/tmp/bun-transpiler-cache
 RUN addgroup -S -g 1001 studio && adduser -S -u 1001 -G studio studio
+RUN mkdir -p /app/storage/database /app/storage/logs /data/media && chown -R 1001:1001 /app/storage /data/media
 # Worker/migrations execute TypeScript; resvg loads a native package at runtime.
 COPY --from=builder --chown=1001:1001 /app /app
 USER 1001:1001
 WORKDIR /app/apps/demo
 EXPOSE 3000
-# Refresh the protected env administrator on each web boot; migrations stay in init.
-CMD ["sh", "-c", "bun run sync-admin && exec bun --bun run start"]
+# Auto-migrate database schema & synchronize administrator on boot
+CMD ["sh", "-c", "bun scripts/auto-migrate.ts && bun scripts/sync-admin.ts && exec bun --bun run start"]

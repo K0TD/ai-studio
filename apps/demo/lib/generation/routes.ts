@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { pool } from "@/lib/db";
+import { toIsoDate } from "@/lib/db/date";
 import {
   mediaResponse,
   MAX_UPLOAD_BYTES,
@@ -125,9 +126,9 @@ const chatBody = z.strictObject({
   title: z.string().trim().min(1).max(120).default("Новый чат"),
 });
 const chatItem = (row: ChatRow) => ({
-  createdAt: new Date(row.created_at).toISOString(),
+  createdAt: toIsoDate(row.created_at),
   id: row.id,
-  isFavorite: row.is_favorite,
+  isFavorite: Boolean(row.is_favorite),
   tab: row.tab,
   title: row.title,
 });
@@ -143,7 +144,11 @@ export const chatsPost = apiRoute(async (request) => {
   const user = await requireUser(request);
   await rateLimit(`chats:${user.id}`, 20, 60);
   const body = await readJson(request, chatBody);
-  if (!user.isApproved || !user.permissions.sections.includes(body.tab)) {
+  const sectionAllowed =
+    user.role === "admin" ||
+    user.role === "vip" ||
+    user.permissions?.sections?.includes(body.tab);
+  if (!user.isApproved || !sectionAllowed) {
     throw new ApiError(403, "Доступ к разделу закрыт");
   }
   const result = await pool.query(
@@ -185,10 +190,11 @@ export const chatDelete = apiRoute(async (request, context: Context) => {
 export const filesPost = apiRoute(async (request) => {
   const user = await requireUser(request);
   await rateLimit(`upload:${user.id}`, 10, 60);
-  if (
-    !user.isApproved ||
-    !user.permissions.sections.some((s) => s === "video" || s === "image")
-  ) {
+  const uploadAllowed =
+    user.role === "admin" ||
+    user.role === "vip" ||
+    user.permissions?.sections?.some((s) => s === "video" || s === "image");
+  if (!user.isApproved || !uploadAllowed) {
     throw new ApiError(403, "Загрузка референсов недоступна");
   }
   const type = request.headers.get("content-type") ?? "";
@@ -384,7 +390,7 @@ export const adminJobReconcilePost = apiRoute(
           .string()
           .regex(/^(0|[1-9]\d{0,9})\.\d{2}$/u)
           .optional(),
-        reason: z.string().trim().min(5).max(500),
+        reason: z.string().trim().max(500).optional().default(""),
       })
     );
     await reconcileJob({ actorId: user.id, jobId, ...body });

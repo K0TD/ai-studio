@@ -3,15 +3,42 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { username } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db, isPostgres } from "@/lib/db";
 // biome-ignore lint/performance/noNamespaceImport: drizzleAdapter needs the full schema namespace to resolve tables
-import * as schema from "@/lib/db/schema";
+import * as pgSchema from "@/lib/db/schema";
+import * as sqliteSchema from "@/lib/db/sqlite-schema";
 
-const createAuth = () =>
-  betterAuth({
+const getBaseURL = () => {
+  if (process.env.NODE_ENV === "production") {
+    return process.env.BETTER_AUTH_URL;
+  }
+  return process.env.BETTER_AUTH_URL_DEV ?? "http://localhost:3000";
+};
+
+const getTrustedOrigins = () => {
+  const list = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://10.255.255.254:3000",
+  ];
+  if (process.env.BETTER_AUTH_URL) {
+    try {
+      list.push(new URL(process.env.BETTER_AUTH_URL).origin);
+    } catch {
+      list.push(process.env.BETTER_AUTH_URL);
+    }
+  }
+  return Array.from(new Set(list));
+};
+
+const createAuth = () => {
+  const schema = isPostgres ? pgSchema : sqliteSchema;
+  return betterAuth({
     advanced: { ipAddress: { ipAddressHeaders: ["x-forwarded-for"] } },
-    baseURL: process.env.BETTER_AUTH_URL,
-    database: drizzleAdapter(db, { provider: "pg", schema }),
+    baseURL: getBaseURL(),
+    database: isPostgres
+      ? drizzleAdapter(db, { provider: "pg", schema: pgSchema })
+      : drizzleAdapter(db, { provider: "sqlite", schema: sqliteSchema }),
     databaseHooks: {
       session: {
         create: {
@@ -20,7 +47,11 @@ const createAuth = () =>
               .select()
               .from(schema.user)
               .where(eq(schema.user.id, candidate.userId));
-            if (!account || account.isBanned || !account.activatedAt) {
+            if (
+              !account ||
+              account.isBanned ||
+              (!account.activatedAt && !account.isEnvAdmin)
+            ) {
               return false;
             }
           },
@@ -33,16 +64,16 @@ const createAuth = () =>
       maxPasswordLength: 128,
       minPasswordLength: 12,
     },
-    logger: { disabled: true },
+    logger: { disabled: process.env.NODE_ENV === "production" },
     plugins: [username({ maxUsernameLength: 64 })],
-    rateLimit: { enabled: true, max: 60, storage: "database", window: 60 },
+    rateLimit: { enabled: true, max: 60, window: 60 },
     secret: process.env.BETTER_AUTH_SECRET,
     session: {
       cookieCache: { enabled: false },
       expiresIn: 60 * 60 * 8,
       updateAge: 60 * 60,
     },
-    trustedOrigins: [process.env.BETTER_AUTH_URL ?? "http://localhost:3000"],
+    trustedOrigins: getTrustedOrigins(),
     user: {
       additionalFields: {
         isApproved: { defaultValue: true, input: false, type: "boolean" },

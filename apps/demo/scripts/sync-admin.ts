@@ -1,9 +1,11 @@
 import { synchronizeAdmin } from "../lib/admin/bootstrap";
+import { ensureDatabase } from "../lib/db/auto-migrate";
 import { pool } from "../lib/db";
 import { validateRuntimeEnv } from "../lib/env";
 
 try {
   const settings = validateRuntimeEnv();
+  await ensureDatabase();
   const outcome = await synchronizeAdmin({
     email: process.env.ADMIN_EMAIL?.trim() || "admin@studio.internal",
     login: settings.ADMIN_LOGIN,

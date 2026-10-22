@@ -13,18 +13,21 @@ x-runtime: &runtime
     - /app/apps/demo/.next/cache:uid=1001,gid=1001,mode=0770,size=128m
   environment: &application-env
     NODE_ENV: production
-    DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the private postgres service URL}
+    DATABASE_URL: ${DATABASE_URL:-}
     ROUTERAI_API_KEY: ${ROUTERAI_API_KEY:?Set ROUTERAI_API_KEY}
     BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a unique BETTER_AUTH_SECRET}
     BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set the public HTTPS application URL}
     ADMIN_LOGIN: ${ADMIN_LOGIN:?Set ADMIN_LOGIN}
     ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set a strong ADMIN_PASSWORD}
     ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-    MEDIA_ROOT: /data/media
+    MEDIA_ROOT: ${MEDIA_ROOT:-/data/media}
+    STORAGE_ROOT: /app/storage
+    SQLITE_PATH: /app/storage/database/studio.sqlite
     QUOTE_MAXIMUM_MULTIPLIER: ${QUOTE_MAXIMUM_MULTIPLIER:-1.20}
-  volumes: [media:/data/media]
+  volumes:
+    - media:/data/media
+    - ./storage:/app/storage
   depends_on:
-    postgres: { condition: service_healthy }
     media-init: { condition: service_completed_successfully }
   logging:
     driver: json-file
@@ -32,12 +35,15 @@ x-runtime: &runtime
 
 services:
   postgres:
+    profiles: [postgres]
     image: postgres:16.13-alpine3.23@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-studio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studio}
+      POSTGRES_DB: ${POSTGRES_DB:-studio}
     volumes: [postgres_data:/var/lib/postgresql/data]
     healthcheck:
       test:
@@ -61,12 +67,13 @@ services:
     security_opt: [no-new-privileges:true]
     volumes:
       - media:/data/media
+      - ./storage:/app/storage
       - backup_work:/work
     command:
       [
         sh,
         -c,
-        "chown 1001:1001 /data/media /work && chmod 0700 /data/media /work",
+        "mkdir -p /data/media /app/storage/database /app/storage/logs && chown -R 1001:1001 /data/media /app/storage /work && chmod -R 0775 /data/media /app/storage /work",
       ]
 
   web:
@@ -96,7 +103,7 @@ services:
     <<: *runtime
     profiles: [ops]
     restart: "no"
-    command: [sh, -c, "bun --bun run db:migrate && bun run sync-admin"]
+    command: [sh, -c, "bun scripts/auto-migrate.ts && bun run sync-admin"]
 
   caddy:
     profiles: [caddy]
@@ -128,9 +135,9 @@ services:
     tmpfs: ["/tmp:mode=1777,size=128m"]
     environment:
       PGHOST: postgres
-      PGUSER: ${POSTGRES_USER:?Set POSTGRES_USER}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      PGDATABASE: ${POSTGRES_DB:?Set POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER:-studio}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-studio}
+      PGDATABASE: ${POSTGRES_DB:-studio}
       RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
       RESTIC_PASSWORD_FILE: /run/secrets/restic_password
       AWS_ACCESS_KEY_ID: ${BACKUP_AWS_ACCESS_KEY_ID:-}
@@ -139,10 +146,10 @@ services:
       RESTIC_CACHE_DIR: /work/restic-cache
     volumes:
       - media:/data/media:ro
+      - ./storage:/app/storage:ro
       - backup_work:/work
       - ./secrets/restic-password:/run/secrets/restic_password:ro
     depends_on:
-      postgres: { condition: service_healthy }
       media-init: { condition: service_completed_successfully }
 
 volumes:

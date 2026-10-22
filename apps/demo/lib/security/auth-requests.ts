@@ -20,14 +20,18 @@ const signInOptions = {
   rememberMe: z.boolean().optional(),
 };
 const credentialSchemas = {
-  "/sign-in/email": z.strictObject({
-    ...signInOptions,
-    email: z.email().max(254),
-  }),
-  "/sign-in/username": z.strictObject({
-    ...signInOptions,
-    username: z.string().min(3).max(64),
-  }),
+  "/sign-in/email": z
+    .object({
+      ...signInOptions,
+      email: z.email().max(254),
+    })
+    .passthrough(),
+  "/sign-in/username": z
+    .object({
+      ...signInOptions,
+      username: z.string().min(3).max(64),
+    })
+    .passthrough(),
 };
 const sessionMutationSchema = z.strictObject({
   token: z.string().min(1).max(256),
@@ -42,18 +46,12 @@ export const validateAuthRequest = async (request: Request): Promise<void> => {
   const path = authRequestPath(request);
   await rateLimit(`auth:ip:${clientNetwork(request)}`, 30, 60);
   if (path === "/sign-in/email") {
-    const credentials = await readJson(
-      request.clone(),
-      credentialSchemas[path]
-    );
+    const credentials = await readJson(request, credentialSchemas[path]);
     await rateLimit(`auth:account:${credentials.email.toLowerCase()}`, 10, 600);
     return;
   }
   if (path === "/sign-in/username") {
-    const credentials = await readJson(
-      request.clone(),
-      credentialSchemas[path]
-    );
+    const credentials = await readJson(request, credentialSchemas[path]);
     await rateLimit(
       `auth:account:${credentials.username.toLowerCase()}`,
       10,
@@ -62,17 +60,17 @@ export const validateAuthRequest = async (request: Request): Promise<void> => {
     return;
   }
   if (path === "/change-password") {
-    await readJson(request.clone(), passwordChangeSchema);
+    await readJson(request, passwordChangeSchema);
     return;
   }
   if (path === "/revoke-session") {
-    await readJson(request.clone(), sessionMutationSchema);
+    await readJson(request, sessionMutationSchema);
     return;
   }
   if (
     ["/sign-out", "/revoke-other-sessions", "/revoke-sessions"].includes(path)
   ) {
-    await readJson(request.clone(), z.strictObject({}));
+    await readJson(request, z.strictObject({}));
     return;
   }
   throw new ApiError(404, "Метод недоступен");

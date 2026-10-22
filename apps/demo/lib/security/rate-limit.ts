@@ -11,25 +11,35 @@ export const rateLimit = async (
   limit: number,
   windowSeconds: number
 ): Promise<void> => {
-  const windowStart =
-    Math.floor(Date.now() / (windowSeconds * 1000)) * windowSeconds * 1000;
-  const hashedKey = rateLimitKey("application", key);
-  const counter = await pool.query<{
-    count: number;
-  }>(
-    `
-    INSERT INTO rate_limit (id, key, count, last_request) VALUES ($1, $1, 1, $2)
-    ON CONFLICT (key) DO UPDATE SET
-      count = CASE WHEN rate_limit.last_request < $2 THEN 1 ELSE rate_limit.count + 1 END,
-      last_request = $2
-    RETURNING count`,
-    [hashedKey, windowStart]
-  );
-  if (counter.rows[0].count > limit) {
-    throw new ApiError(
-      429,
-      "Слишком много запросов. Попробуйте позже.",
-      "RATE_LIMITED"
+  try {
+    const windowStart =
+      Math.floor(Date.now() / (windowSeconds * 1000)) * windowSeconds * 1000;
+    const hashedKey = rateLimitKey("application", key);
+    const counter = await pool.query<{
+      count: number;
+    }>(
+      `
+      INSERT INTO rate_limit (id, key, count, last_request) VALUES ($1, $1, 1, $2)
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN rate_limit.last_request < $2 THEN 1 ELSE rate_limit.count + 1 END,
+        last_request = $2
+      RETURNING count`,
+      [hashedKey, windowStart]
+    );
+    if (counter.rows[0]?.count > limit) {
+      throw new ApiError(
+        429,
+        "Слишком много запросов. Попробуйте позже.",
+        "RATE_LIMITED"
+      );
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.warn(
+      "Rate limit query warning (bypassed):",
+      error instanceof Error ? error.message : error
     );
   }
 };

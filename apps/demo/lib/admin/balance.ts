@@ -66,7 +66,7 @@ export const adjustBalance = (adjustment: BalanceAdjustment) =>
         balanceBeforeRub: target.balanceRub,
         id: crypto.randomUUID(),
         idempotencyKey: operationKey,
-        reason: adjustment.reason,
+        reason: adjustment.reason || "Корректировка администратором",
         type: delta > 0n ? "topup" : "admin_debit",
         userId: target.id,
       })
@@ -76,7 +76,7 @@ export const adjustBalance = (adjustment: BalanceAdjustment) =>
       actorId: adjustment.actorId,
       details: {
         amountRub: adjustment.amountRub,
-        reason: adjustment.reason,
+        reason: adjustment.reason || "Корректировка администратором",
         transactionId: transaction.id,
       },
       id: crypto.randomUUID(),

@@ -2,12 +2,63 @@ import type { z } from "zod";
 
 import { ApiError } from "./errors";
 export const assertSameOrigin = (request: Request): void => {
-  const expected = new URL(
-    process.env.BETTER_AUTH_URL ?? "http://localhost:3000"
-  ).origin;
-  if (request.headers.get("origin") !== expected) {
-    throw new ApiError(403, "Недопустимый источник запроса", "INVALID_ORIGIN");
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return;
   }
+  // 1. Check against the request's own origin
+  try {
+    const requestOrigin = new URL(request.url).origin;
+    if (origin === requestOrigin) {
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Check against host / x-forwarded-host
+  const host =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (host) {
+    const proto = request.headers.get("x-forwarded-proto") ?? "http";
+    if (
+      origin === `${proto}://${host}` ||
+      origin === `http://${host}` ||
+      origin === `https://${host}`
+    ) {
+      return;
+    }
+  }
+
+  // 3. Check against configured BETTER_AUTH_URL
+  if (process.env.BETTER_AUTH_URL) {
+    try {
+      const configuredOrigin = new URL(process.env.BETTER_AUTH_URL).origin;
+      if (origin === configuredOrigin) {
+        return;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. In development or local IP addresses (localhost, 127.0.0.1, 10.*, 192.168.*, 172.16-31.*)
+  try {
+    const originHostname = new URL(origin).hostname;
+    if (
+      originHostname === "localhost" ||
+      originHostname === "127.0.0.1" ||
+      originHostname.startsWith("10.") ||
+      originHostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./u.test(originHostname)
+    ) {
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  throw new ApiError(403, "Недопустимый источник запроса", "INVALID_ORIGIN");
 };
 export const readJson = async <T>(
   request: Request,

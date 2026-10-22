@@ -35,8 +35,20 @@ export const POST = apiRoute(async (request) => {
       );
     }
   }
-  await validateAuthRequest(request);
-  const response = await handlers.POST(request);
+  const bodyText = await request.text();
+  const requestForValidation = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bodyText,
+  });
+  const requestForHandler = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bodyText,
+  });
+
+  await validateAuthRequest(requestForValidation);
+  const response = await handlers.POST(requestForHandler);
   if (path.includes("/sign-in/")) {
     console.info(
       JSON.stringify({ event: "auth.sign_in", success: response.ok })

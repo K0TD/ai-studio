@@ -1,16 +1,24 @@
 import { defineConfig } from "drizzle-kit";
 
-const url = process.env.DATABASE_URL;
+const url = process.env.DATABASE_URL?.trim();
+const isPg = url && /^postgres(ql)?:\/\//i.test(url);
 
-if (!url) {
-  throw new Error("DATABASE_URL is not set");
-}
-
-export default defineConfig({
-  dbCredentials: {
-    url,
-  },
-  dialect: "postgresql",
-  out: "./drizzle",
-  schema: "./lib/db/schema.ts",
-});
+export default isPg
+  ? defineConfig({
+      dbCredentials: {
+        url,
+      },
+      dialect: "postgresql",
+      out: "./drizzle",
+      schema: "./lib/db/schema.ts",
+    })
+  : defineConfig({
+      dbCredentials: {
+        url:
+          process.env.SQLITE_PATH?.trim() ||
+          "./storage/database/studio.sqlite",
+      },
+      dialect: "sqlite",
+      out: "./drizzle",
+      schema: "./lib/db/sqlite-schema.ts",
+    });

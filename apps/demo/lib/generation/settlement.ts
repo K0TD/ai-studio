@@ -253,8 +253,8 @@ export const reconcileJob = async (input: {
     providerCost: input.action === "release" ? "0.00" : input.costRub,
     reason:
       input.action === "settle" && !hasResult
-        ? `${input.reason}. Финансовая сверка завершена; результат не удалось восстановить.`
-        : input.reason,
+        ? `${input.reason ? input.reason + ". " : ""}Финансовая сверка завершена; результат не удалось восстановить.`
+        : (input.reason || "Ручная сверка задания"),
     status: completed ? "completed" : "failed",
   });
 };

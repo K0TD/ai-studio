@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 
 import { parseRub, formatKopecks } from "@/lib/billing/money";
 import { pool } from "@/lib/db";
+import { toIsoDate } from "@/lib/db/date";
 import { ApiError } from "@/lib/security/http";
 import type { AuthUser } from "@/lib/security/http";
 
@@ -28,10 +29,16 @@ export const assertAccountAccess = (
   tab: GenerationRequest["tab"],
   modelId: string
 ) => {
-  if (account.is_banned || !account.is_approved || !account.activated_at) {
+  if (account.is_banned) {
+    throw new ApiError(403, "Аккаунт заблокирован", "ACCOUNT_BANNED");
+  }
+  if (!account.is_approved) {
+    throw new ApiError(403, "Аккаунт ожидает одобрения", "ACCOUNT_NOT_APPROVED");
+  }
+  if (!account.activated_at && account.role !== "admin") {
     throw new ApiError(
       403,
-      "Генерация для аккаунта закрыта",
+      "Генерация для аккаунта закрыта: требуется активация",
       "GENERATION_FORBIDDEN"
     );
   }
@@ -134,7 +141,7 @@ export const jobItem = (row: JobRow, artifacts: { id: string }[] = []) => {
     chargedCostRub: row.charged_cost_rub,
     chatId: row.chat_id,
     costRub: Number(row.charged_cost_rub ?? row.estimated_cost_rub),
-    createdAt: new Date(row.created_at).toISOString(),
+    createdAt: toIsoDate(row.created_at),
     estimatedCostRub: row.estimated_cost_rub,
     id: row.id,
     maxCostRub: row.max_cost_rub,
@@ -223,7 +230,7 @@ export const submitGeneration = async (
           "QUOTE_MISMATCH"
         );
       }
-      if (new Date(quote.expires_at).getTime() <= Date.now()) {
+      if (new Date(toIsoDate(quote.expires_at)).getTime() <= Date.now()) {
         throw new ApiError(
           409,
           "Расчёт устарел. Обновите стоимость",

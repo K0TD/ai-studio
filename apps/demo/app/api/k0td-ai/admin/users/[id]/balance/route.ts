@@ -12,7 +12,7 @@ import { signedRubSchema } from "@/lib/security/permissions";
 
 const adjustmentSchema = z.strictObject({
   amountRub: signedRubSchema,
-  reason: z.string().trim().min(1).max(500),
+  reason: z.string().trim().max(500).optional().default(""),
 });
 export const POST = apiRoute(
   async (request, context: { params: Promise<{ id: string }> }) => {
