@@ -37,10 +37,13 @@ if [ "$running_containers" -gt 0 ]; then
   echo "[*] Обнаружены запущенные контейнеры. Проверка состояния..."
   docker compose ps
 
+  app_port=$(grep -E '^APP_PORT=' .env 2>/dev/null | cut -d '=' -f2 | tr -d ' ' || echo "3050")
+  app_port=${app_port:-3050}
+
   # Проверка сетевой доступности health-эндпоинтов
   echo "[*] Проверка Liveness (/api/health/live)..."
-  if curl -fsS --max-time 5 "http://127.0.0.1:3000/api/health/live" >/dev/null 2>&1; then
-    echo "[+] Liveness (локальный порт 3000): OK"
+  if curl -fsS --max-time 5 "http://127.0.0.1:${app_port}/api/health/live" >/dev/null 2>&1; then
+    echo "[+] Liveness (локальный порт ${app_port}): OK"
   elif curl -fsS --max-time 5 "https://ai-studio.samx.pw/api/health/live" >/dev/null 2>&1; then
     echo "[+] Liveness (https://ai-studio.samx.pw): OK"
   else
@@ -48,8 +51,8 @@ if [ "$running_containers" -gt 0 ]; then
   fi
 
   echo "[*] Проверка Readiness (/api/health/ready)..."
-  if curl -fsS --max-time 8 "http://127.0.0.1:3000/api/health/ready" >/dev/null 2>&1; then
-    echo "[+] Readiness (локальный порт 3000): OK (DB + Worker heartbeat активны)"
+  if curl -fsS --max-time 8 "http://127.0.0.1:${app_port}/api/health/ready" >/dev/null 2>&1; then
+    echo "[+] Readiness (локальный порт ${app_port}): OK (DB + Worker heartbeat активны)"
   elif curl -fsS --max-time 8 "https://ai-studio.samx.pw/api/health/ready" >/dev/null 2>&1; then
     echo "[+] Readiness (https://ai-studio.samx.pw): OK (DB + Worker heartbeat активны)"
   else

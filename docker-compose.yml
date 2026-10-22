@@ -71,6 +71,8 @@ services:
 
   web:
     <<: *runtime
+    ports:
+      - "127.0.0.1:${APP_PORT:-3050}:3000"
     expose: ["3000"]
     healthcheck:
       test: [CMD, bun, scripts/healthcheck.ts]
@@ -97,11 +99,12 @@ services:
     command: [sh, -c, "bun --bun run db:migrate && bun run sync-admin"]
 
   caddy:
+    profiles: [caddy]
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     restart: unless-stopped
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?Set the public DNS hostname}
-      ACME_EMAIL: ${ACME_EMAIL:?Set the TLS certificate contact email}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
