@@ -313,7 +313,7 @@ const runMaintenance = async () => {
   lastMaintenance = Date.now();
   try {
     await pool.query(
-      "DELETE FROM syntx_quotes q WHERE expires_at<now() AND NOT EXISTS (SELECT 1 FROM syntx_jobs j WHERE j.quote_id=q.id)"
+      "DELETE FROM syntx_quotes WHERE expires_at<now() AND NOT EXISTS (SELECT 1 FROM syntx_jobs WHERE syntx_jobs.quote_id=syntx_quotes.id)"
     );
     await pool.query("DELETE FROM invitation WHERE expires_at<now()");
     await pool.query("DELETE FROM rate_limit WHERE last_request<$1", [

@@ -13,13 +13,13 @@ import {
   requireUser,
 } from "@/lib/security/http";
 
-const handlers = toNextJsHandler(auth);
+const handlers = toNextJsHandler(auth.handler);
 export const GET = apiRoute(async (request) => {
   if (!["/get-session", "/list-sessions"].includes(authRequestPath(request))) {
     throw new ApiError(404, "Метод недоступен");
   }
   await rateLimit(`auth-read:${clientNetwork(request)}`, 120, 60);
-  return handlers.GET(request);
+  return auth.handler(request);
 });
 export const POST = apiRoute(async (request) => {
   const path = authRequestPath(request);
@@ -48,7 +48,7 @@ export const POST = apiRoute(async (request) => {
   });
 
   await validateAuthRequest(requestForValidation);
-  const response = await handlers.POST(requestForHandler);
+  const response = await auth.handler(requestForHandler);
   if (path.includes("/sign-in/")) {
     console.info(
       JSON.stringify({ event: "auth.sign_in", success: response.ok })

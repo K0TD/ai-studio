@@ -497,3 +497,25 @@ export const ensureDatabase = async (): Promise<void> => {
     }
   }
 };
+
+export const waitForDatabase = async (timeoutMs = 60_000): Promise<void> => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = isPostgres
+        ? await pool.query(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='syntx_jobs'"
+          )
+        : await pool.query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='syntx_jobs'"
+          );
+      if (res.rowCount) {
+        return;
+      }
+    } catch {
+      // ignore while database is initializing
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  await ensureDatabase();
+};

@@ -91,8 +91,17 @@ let authInstance: ReturnType<typeof createAuth> | undefined;
 export const getAuth = () => (authInstance ??= createAuth());
 
 // Build-time route discovery must not initialize authentication without runtime secrets.
-export const auth = new Proxy({} as ReturnType<typeof createAuth>, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getAuth(), prop, receiver);
-  },
-});
+export const auth = new Proxy(
+  (() => {}) as unknown as ReturnType<typeof createAuth>,
+  {
+    apply(_target, _thisArg, args) {
+      const instance = getAuth();
+      return (instance.handler as any)(...args);
+    },
+    get(_target, prop) {
+      const instance = getAuth();
+      const value = (instance as any)[prop];
+      return typeof value === "function" ? value.bind(instance) : value;
+    },
+  }
+);

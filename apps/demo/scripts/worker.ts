@@ -1,4 +1,4 @@
-import { ensureDatabase } from "../lib/db/auto-migrate";
+import { waitForDatabase } from "../lib/db/auto-migrate";
 import { pool } from "../lib/db";
 import { validateRuntimeEnv } from "../lib/env";
 import { runWorker } from "../lib/generation/worker";
@@ -9,7 +9,7 @@ process.once("SIGINT", () => shutdown.abort());
 
 try {
   validateRuntimeEnv();
-  await ensureDatabase();
+  await waitForDatabase();
   await runWorker({ signal: shutdown.signal });
 } catch {
   // Provider exceptions can contain sensitive URLs or response bodies.

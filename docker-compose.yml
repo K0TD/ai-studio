@@ -90,6 +90,9 @@ services:
 
   worker:
     <<: *runtime
+    depends_on:
+      media-init: { condition: service_completed_successfully }
+      web: { condition: service_started }
     command: [bun, run, worker]
     stop_grace_period: 120s
     healthcheck:

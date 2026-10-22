@@ -22,4 +22,4 @@ USER 1001:1001
 WORKDIR /app/apps/demo
 EXPOSE 3000
 # Auto-migrate database schema & synchronize administrator on boot
-CMD ["sh", "-c", "bun scripts/auto-migrate.ts && bun scripts/sync-admin.ts && exec bun --bun run start"]
+CMD ["sh", "-c", "bun scripts/auto-migrate.ts && exec bun --bun run start"]

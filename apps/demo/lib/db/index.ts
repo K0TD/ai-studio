@@ -69,7 +69,8 @@ const getSqliteDb = () => {
     sqliteInstance = new Database(sqlitePath, { create: true });
     sqliteInstance.run("PRAGMA journal_mode = WAL;");
     sqliteInstance.run("PRAGMA foreign_keys = ON;");
-    sqliteInstance.run("PRAGMA busy_timeout = 5000;");
+    sqliteInstance.run("PRAGMA busy_timeout = 15000;");
+    sqliteInstance.run("PRAGMA synchronous = NORMAL;");
   }
   return sqliteInstance;
 };
@@ -136,6 +137,16 @@ const translatePgToSqlite = (sqlText: string, params: any[] = []) => {
   // 5. Remove PostgreSQL lock clauses
   sql = sql.replace(/\bFOR\s+UPDATE(\s+SKIP\s+LOCKED)?\b/gi, "");
   sql = sql.replace(/select\s+pg_advisory_xact_lock\([^)]+\)/gi, "SELECT 1");
+
+  // 6. Remove table aliases in DELETE FROM statements (e.g. DELETE FROM table alias WHERE -> DELETE FROM table WHERE)
+  sql = sql.replace(
+    /\bDELETE\s+FROM\s+([a-zA-Z0-9_"]+)\s+([a-zA-Z0-9_"]+)\s+WHERE\b/gi,
+    (_match, tbl, alias) => {
+      const aliasPattern = new RegExp(`\\b${alias}\\.`, "g");
+      sql = sql.replace(aliasPattern, `${tbl}.`);
+      return `DELETE FROM ${tbl} WHERE`;
+    }
+  );
 
   return { boundParams, sql };
 };
