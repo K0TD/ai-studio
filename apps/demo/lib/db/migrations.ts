@@ -165,8 +165,19 @@ const normalizeBalances = async (client: Client) => {
 };
 
 const ensurePostgresWalletChecks = async (client: Client) => {
+  await client.query(
+    'ALTER TABLE "user" DROP CONSTRAINT IF EXISTS user_balance_check'
+  );
+  await client.query(
+    'ALTER TABLE "user" ADD CONSTRAINT user_balance_check CHECK (reserved_rub >= 0)'
+  );
+  await client.query(
+    "ALTER TABLE syntx_jobs DROP CONSTRAINT IF EXISTS syntx_jobs_amounts"
+  );
+  await client.query(
+    "ALTER TABLE syntx_jobs ADD CONSTRAINT syntx_jobs_amounts CHECK (estimated_cost_rub >= 0 AND max_cost_rub >= estimated_cost_rub AND (charged_cost_rub IS NULL OR charged_cost_rub >= 0))"
+  );
   for (const [name, expression] of [
-    ["user_balance_check", "balance_rub >= reserved_rub AND reserved_rub >= 0"],
     ["user_role_check", "role IN ('user','vip','admin')"],
   ]) {
     const existing = await client.query(
@@ -231,6 +242,23 @@ const migrations = [
     if (isPostgres) {
       await postgresIntegrity(client);
     } else {
+      for (const statement of sqliteIntegrity) {
+        await client.query(statement);
+      }
+    }
+  },
+  async (client: Client) => {
+    if (isPostgres) {
+      await postgresIntegrity(client);
+    } else {
+      for (const trigger of [
+        "user_wallet_integrity_insert",
+        "user_wallet_integrity_update",
+        "syntx_jobs_job_amounts_insert",
+        "syntx_jobs_job_amounts_update",
+      ]) {
+        await client.query(`DROP TRIGGER IF EXISTS "${trigger}"`);
+      }
       for (const statement of sqliteIntegrity) {
         await client.query(statement);
       }

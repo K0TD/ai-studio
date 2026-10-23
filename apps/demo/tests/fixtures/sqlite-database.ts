@@ -287,11 +287,10 @@ if (scenario === "invalid") {
   await synchronizeAdmin(credentials);
   await ensureDatabase();
   await assertBalance(admin.id, "0.00");
-  await assert.rejects(
-    pool.query("UPDATE \"user\" SET balance_rub='-1.00' WHERE id=$1", [
-      admin.id,
-    ])
-  );
+  await pool.query("UPDATE \"user\" SET balance_rub='-1.00' WHERE id=$1", [
+    admin.id,
+  ]);
+  await assertBalance(admin.id, "-1.00");
   await assert.rejects(
     pool.query("DELETE FROM transactions WHERE user_id=$1", [admin.id])
   );
@@ -307,7 +306,7 @@ if (scenario === "invalid") {
     'SELECT balance_rub FROM "user" WHERE id=$1',
     [admin.id]
   );
-  assert.equal(accountAfterRestart.balance_rub, "0.00");
+  assert.equal(accountAfterRestart.balance_rub, "-1.00");
   const memberAfterRestart = await pool.query(
     'SELECT id FROM "user" WHERE id=$1',
     [targetId]

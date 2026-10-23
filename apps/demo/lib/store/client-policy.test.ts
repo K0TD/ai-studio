@@ -64,7 +64,7 @@ test("VIP and admins have model access, ordinary users retain budget and explici
 });
 test("quote requires valid expiry and enough funds for maximum reserve", () => {
   const now = Date.parse("2026-10-22T00:00:00Z");
-  const quote = { expiresAt: "2026-10-22T00:01:00Z", maxCostRub: "15.00" };
+  const quote = { expiresAt: "2026-10-22T00:01:00Z", reserveCostRub: "15.00" };
   assert.equal(validQuote(quote, "15.00", now), true);
   assert.equal(validQuote(quote, "14.99", now), false);
   assert.equal(validQuote(quote, "15.00", now + 60_000), false);
@@ -73,11 +73,11 @@ test("quote requires valid expiry and enough funds for maximum reserve", () => {
     false
   );
   assert.equal(
-    validQuote({ ...quote, maxCostRub: "Infinity" }, "100.00", now),
+    validQuote({ ...quote, reserveCostRub: "Infinity" }, "100.00", now),
     false
   );
   assert.equal(
-    validQuote({ ...quote, maxCostRub: "0.00" }, "100.00", now),
+    validQuote({ ...quote, reserveCostRub: "0.00" }, "100.00", now),
     false
   );
   assert.equal(validQuote(null, "100.00", now), false);

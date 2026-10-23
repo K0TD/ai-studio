@@ -6,12 +6,14 @@ import {
   videoResponseSchema,
   imageResponseSchema,
   providerCatalogSchema,
+  providerEndpointsSchema,
+  generationCostSchema,
   uploadResponseSchema,
   geminiImageUrls,
   nativeImageUrls,
   usageSchema,
 } from "./responses";
-import type { ProviderModel } from "./responses";
+import type { ProviderEndpoint, ProviderModel } from "./responses";
 import type {
   ImageGenerateRequest,
   RouterAIVideoResponse,
@@ -224,6 +226,30 @@ export class RouterAIClient {
     const catalog = await this.json("/models", providerCatalogSchema);
     return catalog.data;
   }
+  async getModelEndpoints(modelId: string): Promise<ProviderEndpoint[]> {
+    const [author, model] = modelId.split("/");
+    if (!author || !model || modelId.split("/").length !== 2) {
+      throw new RouterAIError("Некорректный идентификатор модели", 400);
+    }
+    const result = await this.json(
+      `/models/${encodeURIComponent(author)}/${encodeURIComponent(model)}/endpoints`,
+      providerEndpointsSchema
+    );
+    return result.data.endpoints;
+  }
+  async getGenerationCost(generationId: string): Promise<number | undefined> {
+    if (!generationId || generationId.length > 300) {
+      return undefined;
+    }
+    try {
+      return await this.json(
+        `/generation?id=${encodeURIComponent(generationId)}`,
+        generationCostSchema
+      );
+    } catch {
+      return undefined;
+    }
+  }
   generateVideo(request: VideoGenerateRequest): Promise<RouterAIVideoResponse> {
     return this.json("/videos", videoResponseSchema, {
       body: JSON.stringify(request),
@@ -261,6 +287,7 @@ export class RouterAIClient {
           ],
           modalities: ["image", "text"],
           model: request.model,
+          provider: request.provider,
         }
       : request;
     const result = await this.json(
@@ -341,8 +368,13 @@ export class RouterAIClient {
         context
       );
     }
+    const generationId = response.headers.get("x-generation-id") ?? undefined;
+    const cost = generationId
+      ? await this.getGenerationCost(generationId)
+      : undefined;
     return {
-      generationId: response.headers.get("x-generation-id") ?? undefined,
+      cost,
+      generationId,
       urls: [`data:${mime};base64,${bytes.toString("base64")}`],
     };
   }

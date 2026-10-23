@@ -13,6 +13,14 @@ export const usageSchema = z
   .object({ cost: nonnegativePrice })
   .nullish()
   .transform((value) => value ?? undefined);
+export const generationCostSchema = z
+  .union([
+    z.object({ total_cost: nonnegativePrice }),
+    z.object({ data: z.object({ total_cost: nonnegativePrice }) }),
+  ])
+  .transform((value) =>
+    "total_cost" in value ? value.total_cost : value.data.total_cost
+  );
 export const videoResponseSchema = z.object({
   error: z
     .union([z.string(), z.object({ message: z.string().optional() })])
@@ -91,6 +99,12 @@ export const providerModelSchema = z.object({
     .finite()
     .positive()
     .optional(),
+  architecture: z
+    .object({
+      input_modalities: nullableStrings,
+      output_modalities: nullableStrings,
+    })
+    .optional(),
   frames_exclusive_with_references: optionalBoolean,
   generate_audio: optionalBoolean,
   id: z.string(),
@@ -147,6 +161,30 @@ export const providerModelSchema = z.object({
   supports_negative_prompt: optionalBoolean,
   supports_reference_images: optionalBoolean,
 });
+export const providerEndpointSchema = z.looseObject({
+  name: z.string().max(500).optional(),
+  pricing: z
+    .record(
+      z.string(),
+      z.union([
+        z.number().finite().nonnegative(),
+        z.string().regex(/^\d+(?:\.\d+)?$/u),
+      ])
+    )
+    .default({}),
+  pricing_units: z.record(z.string(), z.string()).default({}),
+  provider_name: z.string().max(200).optional(),
+  status: z.number().int().optional(),
+  supported_apis: nullableStrings,
+  supported_parameters: nullableStrings,
+  tag: z.string().min(1).max(160),
+});
+export const providerEndpointsSchema = z.object({
+  data: z.object({
+    endpoints: z.array(providerEndpointSchema).max(100),
+    id: z.string().max(200),
+  }),
+});
 const catalogEntries = z.array(z.json()).transform((entries) =>
   entries.flatMap((entry) => {
     const parsed = providerModelSchema.safeParse(entry);
@@ -155,6 +193,7 @@ const catalogEntries = z.array(z.json()).transform((entries) =>
 );
 export const providerCatalogSchema = z.object({ data: catalogEntries });
 export type ProviderModel = z.infer<typeof providerModelSchema>;
+export type ProviderEndpoint = z.infer<typeof providerEndpointSchema>;
 
 type ImageResponse = z.infer<typeof imageResponseSchema>;
 const providerImageUrl = (

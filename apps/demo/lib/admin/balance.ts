@@ -44,7 +44,7 @@ export const adjustBalance = (adjustment: BalanceAdjustment) =>
     if (delta === 0n) {
       throw new ApiError(400, "Сумма должна отличаться от нуля");
     }
-    if (next < parseRub(target.reservedRub)) {
+    if (delta < 0n && next < parseRub(target.reservedRub)) {
       throw new ApiError(409, "Можно отозвать только доступный остаток");
     }
     const nextRub = formatKopecks(next);

@@ -8,7 +8,7 @@ case "${RESTIC_REPOSITORY:-}" in
   *) echo "RESTIC_REPOSITORY must point to an external encrypted repository." >&2; exit 1 ;;
 esac
 test -s "${RESTIC_PASSWORD_FILE:?Missing restic password file}"
-media_root=${MEDIA_ROOT:-/data/media}
+media_root=${MEDIA_ROOT:-/app/storage/generation}
 test -d "$media_root"
 
 if [ "${1:-}" = "init" ]; then

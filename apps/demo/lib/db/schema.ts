@@ -55,10 +55,7 @@ export const user = pgTable(
   },
   (table) => [
     check("user_role_check", sql`${table.role} in ('user', 'vip', 'admin')`),
-    check(
-      "user_balance_check",
-      sql`${table.balanceRub} >= ${table.reservedRub} and ${table.reservedRub} >= 0`
-    ),
+    check("user_balance_check", sql`${table.reservedRub} >= 0`),
     uniqueIndex("user_env_admin_unique")
       .on(table.isEnvAdmin)
       .where(sql`${table.isEnvAdmin} = true`),

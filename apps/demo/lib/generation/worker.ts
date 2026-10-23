@@ -10,6 +10,7 @@ import {
   ensureMediaStorage,
   ensureMediaCapacity,
   imageMime,
+  MAX_REFERENCE_TOTAL_BYTES,
   readMedia,
   saveMedia,
 } from "@/lib/media/storage";
@@ -350,24 +351,32 @@ const prepareReferences = async (job: Job) => {
   const { request } = job;
   const ids = referencedFileIds(request.settings);
   const references = ids.length
-    ? await pool.query<Pick<FileRow, "id" | "storage_key" | "mime_type">>(
-        "SELECT id,storage_key,mime_type FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
+    ? await pool.query<
+        Pick<FileRow, "id" | "storage_key" | "mime_type" | "size_bytes">
+      >(
+        "SELECT id,storage_key,mime_type,size_bytes FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
         [job.user_id, ids]
       )
     : { rows: [] };
   const { rows } = references;
-  const dataById = new Map<string, string>();
+  if (
+    rows.reduce((sum, row) => sum + Number(row.size_bytes), 0) >
+    MAX_REFERENCE_TOTAL_BYTES
+  ) {
+    throw new ApiError(413, "Общий размер вложений не должен превышать 24 МБ");
+  }
+  const dataById = new Map<string, { url: string; mime: string }>();
   for (const row of rows) {
     const queryResult2 = await readMedia(row.storage_key);
-    dataById.set(
-      row.id,
-      `data:${row.mime_type};base64,${queryResult2.toString("base64")}`
-    );
+    dataById.set(row.id, {
+      mime: row.mime_type,
+      url: `data:${row.mime_type};base64,${queryResult2.toString("base64")}`,
+    });
   }
   if (new Set(ids).size !== dataById.size) {
     throw new ApiError(404, "Референс недоступен");
   }
-  const urlFor = (id: string): string => {
+  const mediaFor = (id: string): { url: string; mime: string } => {
     const data = dataById.get(id);
     if (!data) {
       throw new ApiError(404, "Референс недоступен");
@@ -377,14 +386,18 @@ const prepareReferences = async (job: Job) => {
   return {
     frames: (request.settings.frameImages ?? []).map((frame) => ({
       ...frame,
-      image_url: { url: urlFor(localReferenceId(frame.image_url.url)) },
+      image_url: { url: mediaFor(localReferenceId(frame.image_url.url)).url },
     })),
-    input: (request.settings.inputReferences ?? []).map((ref) => ({
-      image_url: {
-        url: urlFor(referenceId(ref)),
-      },
-      type: "image_url" as const,
-    })),
+    input: (request.settings.inputReferences ?? []).map((ref) => {
+      const media = mediaFor(referenceId(ref));
+      if (media.mime.startsWith("image/")) {
+        return { image_url: { url: media.url }, type: "image_url" as const };
+      }
+      if (media.mime.startsWith("video/")) {
+        return { type: "video_url" as const, video_url: { url: media.url } };
+      }
+      return { audio_url: { url: media.url }, type: "audio_url" as const };
+    }),
   };
 };
 
@@ -490,7 +503,16 @@ const submit = async (job: Job) => {
     };
     if (settings.heygenVoiceId) {
       payload.provider = {
+        allow_fallbacks: false,
+        only: job.catalog_snapshot.providerRoute?.tag
+          ? [job.catalog_snapshot.providerRoute.tag]
+          : undefined,
         options: { heygen: { voice_id: settings.heygenVoiceId } },
+      };
+    } else if (job.catalog_snapshot.providerRoute?.tag) {
+      payload.provider = {
+        allow_fallbacks: false,
+        only: [job.catalog_snapshot.providerRoute.tag],
       };
     }
     const result = await traceProviderOperation(job, "video_submit", () =>
@@ -508,18 +530,34 @@ const submit = async (job: Job) => {
       })
     );
   } else if (job.tab === "image") {
+    const imageReferences = references.input.map((reference) => {
+      if (reference.type !== "image_url") {
+        throw new ApiError(
+          422,
+          "Модель изображения принимает только изображения"
+        );
+      }
+      return {
+        image_url: reference.image_url,
+        type: "image_url" as const,
+      };
+    });
     const result = await traceProviderOperation(job, "image_submit", () =>
       routerai.generateImage({
         aspect_ratio: settings.aspectRatio,
         background: settings.background,
-        input_references: references.input.length
-          ? references.input
-          : undefined,
+        input_references: imageReferences.length ? imageReferences : undefined,
         model: modelId,
         n: settings.n,
         negative_prompt: settings.negativePrompt,
         output_format: settings.outputFormat,
         prompt,
+        provider: job.catalog_snapshot.providerRoute?.tag
+          ? {
+              allow_fallbacks: false,
+              only: [job.catalog_snapshot.providerRoute.tag],
+            }
+          : undefined,
         quality: settings.quality,
         resolution: settings.resolution,
         seed: settings.seed,
@@ -546,6 +584,12 @@ const submit = async (job: Job) => {
       routerai.generateSpeech({
         input: prompt,
         model: modelId,
+        provider: job.catalog_snapshot.providerRoute?.tag
+          ? {
+              allow_fallbacks: false,
+              only: [job.catalog_snapshot.providerRoute.tag],
+            }
+          : undefined,
         response_format: "mp3",
         voice: voiceId,
       })
@@ -579,7 +623,7 @@ const persistArtifact = async (
       throw new Error("Invalid provider image content");
     }
   }
-  const key = await saveMedia(bytes, job.id, String(ordinal));
+  const key = await saveMedia(bytes, `${job.tab}/${job.id}`, String(ordinal));
   await pool.query(
     "INSERT INTO syntx_artifacts (id,job_id,user_id,ordinal,storage_key,mime_type,size_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(job_id,ordinal) DO UPDATE SET storage_key=excluded.storage_key,mime_type=excluded.mime_type,size_bytes=excluded.size_bytes",
     [randomUUID(), job.id, job.user_id, ordinal, key, finalMime, bytes.length]

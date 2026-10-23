@@ -33,7 +33,7 @@ export const settingsSchema = z.strictObject({
         type: z.enum(["file", "image_url"]),
       })
     )
-    .max(4)
+    .max(30)
     .optional(),
   instrumental: z.boolean().optional(),
   lyrics: z.string().max(5000).optional(),
@@ -107,14 +107,13 @@ const validateFrames = (
   input: GenerationRequest["settings"],
   model: CatalogModel
 ) => {
-  const { raw } = model;
   for (const frame of input.frameImages ?? []) {
-    if (!raw.supported_frame_images?.includes(frame.frame_type)) {
+    if (!model.supportedFrameImages?.includes(frame.frame_type)) {
       fail("кадры");
     }
   }
   if (
-    raw.frames_exclusive_with_references &&
+    model.framesExclusiveWithReferences &&
     input.frameImages?.length &&
     input.inputReferences?.length
   ) {
@@ -133,7 +132,10 @@ const validateCommon = (
   if (input.seed !== undefined && !model.supportsSeed) {
     fail("seed");
   }
-  if ((input.inputReferences?.length ?? 0) > (raw.max_image_references ?? 4)) {
+  if (
+    (input.inputReferences?.length ?? 0) >
+    (model.maxReferenceCount ?? raw.max_image_references ?? 4)
+  ) {
     fail("число референсов");
   }
   if (input.inputReferences?.length && !model.supportsReferences) {

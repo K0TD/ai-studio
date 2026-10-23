@@ -76,7 +76,7 @@ export const modelAllowed = (
 export const validQuote = (
   quote: {
     expiresAt: string;
-    maxCostRub: string;
+    reserveCostRub: string;
   } | null,
   availableRub: string,
   now = Date.now()
@@ -89,11 +89,11 @@ export const validQuote = (
     return false;
   }
   return (
-    /^\d+(\.\d{1,2})?$/u.test(quote.maxCostRub) &&
-    /^\d+(\.\d{1,2})?$/u.test(availableRub) &&
-    Number.isFinite(Number(quote.maxCostRub)) &&
-    Number(quote.maxCostRub) > 0 &&
-    Number(availableRub) >= Number(quote.maxCostRub)
+    /^\d+(\.\d{1,2})?$/u.test(quote.reserveCostRub) &&
+    /^-?\d+(\.\d{1,2})?$/u.test(availableRub) &&
+    Number.isFinite(Number(quote.reserveCostRub)) &&
+    Number(quote.reserveCostRub) > 0 &&
+    Number(availableRub) >= Number(quote.reserveCostRub)
   );
 };
 export const disabledModelReason = (reason?: string): string =>

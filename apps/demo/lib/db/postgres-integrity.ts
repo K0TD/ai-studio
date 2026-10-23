@@ -31,7 +31,7 @@ ALTER TABLE transactions ADD CONSTRAINT transactions_job_fk FOREIGN KEY(job_id) 
 --> statement-breakpoint
 ALTER TABLE transactions ADD CONSTRAINT transactions_arithmetic CHECK (balance_after_rub = balance_before_rub + amount_rub);
 --> statement-breakpoint
-ALTER TABLE syntx_jobs ADD CONSTRAINT syntx_jobs_amounts CHECK (estimated_cost_rub >= 0 AND max_cost_rub >= estimated_cost_rub AND (charged_cost_rub IS NULL OR (charged_cost_rub >= 0 AND charged_cost_rub <= max_cost_rub)));
+ALTER TABLE syntx_jobs ADD CONSTRAINT syntx_jobs_amounts CHECK (estimated_cost_rub >= 0 AND max_cost_rub >= estimated_cost_rub AND (charged_cost_rub IS NULL OR charged_cost_rub >= 0));
 --> statement-breakpoint
 CREATE FUNCTION reject_ledger_rewrite() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

@@ -21,7 +21,7 @@ export const sqliteIntegrity = [
   ...guard(
     "user",
     "wallet_integrity",
-    `NOT ${validMoney("NEW.balance_rub")} OR NOT ${validMoney("NEW.reserved_rub")} OR ${cents("NEW.balance_rub")} < ${cents("NEW.reserved_rub")}`
+    `NOT ${validMoney("NEW.balance_rub", true)} OR NOT ${validMoney("NEW.reserved_rub")}`
   ),
   ...guard(
     "user",
@@ -31,7 +31,7 @@ export const sqliteIntegrity = [
   ...guard(
     "transactions",
     "ledger_arithmetic",
-    `NOT ${validMoney("NEW.amount_rub", true)} OR NOT ${validMoney("NEW.balance_before_rub")} OR NOT ${validMoney("NEW.balance_after_rub")} OR ${cents("NEW.balance_after_rub")} <> ${cents("NEW.balance_before_rub")} + ${cents("NEW.amount_rub")}`
+    `NOT ${validMoney("NEW.amount_rub", true)} OR NOT ${validMoney("NEW.balance_before_rub", true)} OR NOT ${validMoney("NEW.balance_after_rub", true)} OR ${cents("NEW.balance_after_rub")} <> ${cents("NEW.balance_before_rub")} + ${cents("NEW.amount_rub")}`
   ),
   ...guard(
     "transactions",
@@ -41,7 +41,7 @@ export const sqliteIntegrity = [
   ...guard(
     "syntx_jobs",
     "job_amounts",
-    `NOT ${validMoney("NEW.estimated_cost_rub")} OR NOT ${validMoney("NEW.max_cost_rub")} OR ${cents("NEW.max_cost_rub")} < ${cents("NEW.estimated_cost_rub")} OR (NEW.charged_cost_rub IS NOT NULL AND (NOT ${validMoney("NEW.charged_cost_rub")} OR ${cents("NEW.charged_cost_rub")} > ${cents("NEW.max_cost_rub")}))`
+    `NOT ${validMoney("NEW.estimated_cost_rub")} OR NOT ${validMoney("NEW.max_cost_rub")} OR ${cents("NEW.max_cost_rub")} < ${cents("NEW.estimated_cost_rub")} OR (NEW.charged_cost_rub IS NOT NULL AND NOT ${validMoney("NEW.charged_cost_rub")})`
   ),
   ...guard(
     "syntx_jobs",

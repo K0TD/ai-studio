@@ -4,17 +4,20 @@ import { parseRub, formatKopecks } from "@/lib/billing/money";
 import { pool, sumRubSql } from "@/lib/db";
 import type { DatabaseClient } from "@/lib/db";
 import { toIsoDate } from "@/lib/db/date";
+import { MAX_REFERENCE_TOTAL_BYTES } from "@/lib/media/storage";
 import { isBudgetModel } from "@/lib/routerai/models-catalog";
 import { ApiError } from "@/lib/security/http";
 import type { AuthUser } from "@/lib/security/http";
 
-import { requireModel, permittedModel, estimate } from "./catalog";
+import { requireModel, permittedModel } from "./catalog";
+import type { CatalogModel } from "./catalog";
 import {
   normalizedSettings,
   referencedFileIds,
   requestHash,
 } from "./contracts";
 import type { GenerationRequest } from "./contracts";
+import { selectProvider } from "./provider-routing";
 import type { ArtifactRow, JobRow, WalletRow, QuoteRow } from "./rows";
 
 export const assertAccountAccess = (
@@ -73,7 +76,8 @@ export const assertAccountAccess = (
 const checkOwnedRequest = async (
   client: Pick<DatabaseClient, "query">,
   accountId: string,
-  request: GenerationRequest
+  request: GenerationRequest,
+  model: CatalogModel
 ) => {
   const queryResult1 = await client.query(
     "SELECT id,tab FROM syntx_chats WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL",
@@ -86,27 +90,76 @@ const checkOwnedRequest = async (
   const refs = [...new Set(referencedFileIds(request.settings))];
   if (refs.length) {
     const queryResult2 = await client.query(
-      "SELECT id FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
+      "SELECT id,mime_type,size_bytes FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
       [accountId, refs]
     );
     const owned = queryResult2.rows;
     if (owned.length !== refs.length) {
       throw new ApiError(404, "Референс не найден", "REFERENCE_NOT_FOUND");
     }
+    const totalBytes = owned.reduce(
+      (sum, file) => sum + Number(file.size_bytes),
+      0
+    );
+    if (totalBytes > MAX_REFERENCE_TOTAL_BYTES) {
+      throw new ApiError(
+        413,
+        "Общий размер вложений не должен превышать 24 МБ",
+        "REFERENCES_TOO_LARGE"
+      );
+    }
+    const allowedTypes = new Set(model.supportedInputTypes);
+    if (
+      model.category === "video" &&
+      (model.supportsReferences || model.supportsFrameReferences)
+    ) {
+      allowedTypes.add("image");
+    }
+    if (request.tab === "image") {
+      allowedTypes.add("image");
+    }
+    for (const file of owned) {
+      const [mediaType] = String(file.mime_type).split("/");
+      if (
+        mediaType !== "image" &&
+        mediaType !== "video" &&
+        mediaType !== "audio"
+      ) {
+        throw new ApiError(
+          422,
+          "Модель не принимает этот тип вложения",
+          "UNSUPPORTED_REFERENCE_TYPE"
+        );
+      }
+      if (!allowedTypes.has(mediaType)) {
+        throw new ApiError(
+          422,
+          "Модель не принимает этот тип вложения",
+          "UNSUPPORTED_REFERENCE_TYPE"
+        );
+      }
+    }
   }
 };
 
 export const createQuote = async (
   account: AuthUser,
-  request: GenerationRequest
+  request: GenerationRequest,
+  providerTag?: string
 ) => {
   if (!account.isApproved) {
     throw new ApiError(403, "Доступ к генерации не одобрен");
   }
   const model = await requireModel(account, request.modelId, request.tab);
   const settings = normalizedSettings(request, model);
-  await checkOwnedRequest(pool, account.id, { ...request, settings });
-  const estimatedCostRub = estimate(model, settings, request.prompt);
+  await checkOwnedRequest(pool, account.id, { ...request, settings }, model);
+  const provider = await selectProvider(
+    model,
+    settings,
+    request.prompt,
+    providerTag
+  );
+  const { estimatedCostRub } = provider;
   const multiplier = Math.round(
     Number(process.env.QUOTE_MAXIMUM_MULTIPLIER ?? "1.20") * 100
   );
@@ -126,7 +179,11 @@ export const createQuote = async (
       requestHash(request),
       estimatedCostRub,
       maxCostRub,
-      JSON.stringify(model),
+      JSON.stringify({
+        ...model,
+        providerOptions: provider.options,
+        providerRoute: provider.provider,
+      }),
       expiresAt,
     ]
   );
@@ -134,7 +191,9 @@ export const createQuote = async (
     estimatedCostRub,
     expiresAt: expiresAt.toISOString(),
     id,
-    maxCostRub,
+    provider: provider.provider,
+    providerOptions: provider.options,
+    reserveCostRub: maxCostRub,
   };
 };
 
@@ -156,19 +215,21 @@ export const jobItem = (row: JobRow, artifacts: { id: string }[] = []) => {
     createdAt: toIsoDate(row.created_at),
     estimatedCostRub: estimated,
     id: row.id,
-    maxCostRub: maxCost,
     metadata: {
       aspectRatio: settings.aspectRatio,
       audioVoice: settings.voiceId,
       durationSeconds: settings.duration,
       error: row.error ?? undefined,
       generateAudio: settings.generateAudio,
+      provider: row.catalog_snapshot.providerRoute,
+      providerOptions: row.catalog_snapshot.providerOptions,
       resolution: settings.resolution,
     },
     modelId: row.model_id,
     outputUrls: artifacts.map((a) => `/api/k0td-ai/media/${a.id}`),
     pricingSource: row.pricing_source,
     prompt: row.prompt,
+    reserveCostRub: maxCost,
     stage: row.status,
     status: ["queued", "submitting", "running", "persisting"].includes(
       row.status
@@ -195,6 +256,34 @@ export const getJob = async (userId: string, id: string) => {
   );
   const artifacts = queryResult10.rows;
   return jobItem(row, artifacts);
+};
+
+const retrySource = async (userId: string, id: string): Promise<JobRow> => {
+  const result = await pool.query<JobRow>(
+    "SELECT * FROM syntx_jobs WHERE id=$1 AND user_id=$2",
+    [id, userId]
+  );
+  const [row] = result.rows;
+  if (!row) {
+    throw new ApiError(404, "Задание не найдено", "JOB_NOT_FOUND");
+  }
+  if (row.status !== "failed" || !row.settled_at) {
+    throw new ApiError(
+      409,
+      "Повтор доступен только после подтверждённого отказа провайдера",
+      "JOB_NOT_RETRYABLE"
+    );
+  }
+  return row;
+};
+
+export const createRetryQuote = async (
+  account: AuthUser,
+  sourceJobId: string,
+  providerTag: string
+) => {
+  const source = await retrySource(account.id, sourceJobId);
+  return createQuote(account, source.request, providerTag);
 };
 
 export const submitGeneration = async (
@@ -266,7 +355,7 @@ export const submitGeneration = async (
         ...request,
         settings: normalizedSettings(request, snapshot),
       };
-      await checkOwnedRequest(client, account.id, normalized);
+      await checkOwnedRequest(client, account.id, normalized, snapshot);
       const queryResult7 = await client.query(
         `SELECT count(*)::int AS count,${sumRubSql("max_cost_rub")} AS held FROM syntx_jobs WHERE user_id=$1 AND settled_at IS NULL`,
         [account.id]
@@ -280,6 +369,13 @@ export const submitGeneration = async (
         );
       }
       const reserve = parseRub(quote.max_cost_rub);
+      if (parseRub(owner.balance_rub) - parseRub(owner.reserved_rub) < 0n) {
+        throw new ApiError(
+          402,
+          "На балансе есть долг. Пополните счёт, чтобы запускать генерации.",
+          "BALANCE_DEBT"
+        );
+      }
       if (
         parseRub(owner.balance_rub) - parseRub(owner.reserved_rub) <
         reserve
@@ -353,6 +449,16 @@ export const submitGeneration = async (
     client.release();
   }
   return getJob(account.id, jobId);
+};
+
+export const submitRetryGeneration = async (
+  account: AuthUser,
+  sourceJobId: string,
+  quoteId: string,
+  key: string
+) => {
+  const source = await retrySource(account.id, sourceJobId);
+  return submitGeneration(account, source.request, quoteId, key);
 };
 
 export const listJobs = async (

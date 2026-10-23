@@ -13,6 +13,11 @@ import {
 const boundedText = z.string().max(10_000);
 const identifier = z.string().min(1).max(160);
 const optionList = z.array(z.string().max(160)).max(500);
+const providerChoiceSchema = z.object({
+  estimatedCostRub: rubSchema,
+  name: z.string().max(500),
+  tag: z.string().max(160),
+});
 export const mediaUrlSchema = z
   .string()
   .max(2048)
@@ -24,8 +29,10 @@ export const clientModelSchema = z.object({
   description: boundedText.optional(),
   disabledReason: z.string().max(160).optional(),
   enabled: z.boolean(),
+  framesExclusiveWithReferences: z.boolean().optional(),
   id: identifier,
   maxImageCount: z.number().int().positive().optional(),
+  maxReferenceCount: z.number().int().nonnegative().optional(),
   name: z.string().max(500),
   priceUnit: z.enum(["request", "second", "image", "token"]),
   provider: z.string().max(160),
@@ -40,11 +47,16 @@ export const clientModelSchema = z.object({
     .max(100)
     .optional(),
   supportedFrameImages: optionList.optional(),
+  supportedInputTypes: z
+    .array(z.enum(["image", "video", "audio"]))
+    .max(3)
+    .optional(),
   supportedOutputFormats: optionList.optional(),
   supportedQualities: optionList.optional(),
   supportedResolutions: optionList.optional(),
   supportedVoices: optionList.optional(),
   supportsAudio: z.boolean().optional(),
+  supportsFrameReferences: z.boolean().optional(),
   supportsNegativePrompt: z.boolean().optional(),
   supportsReferences: z.boolean().optional(),
   supportsSeed: z.boolean().optional(),
@@ -90,7 +102,6 @@ export const generationItemSchema = z.object({
   createdAt: z.iso.datetime({ offset: true }),
   estimatedCostRub: safeRubSchema.optional(),
   id: z.uuid(),
-  maxCostRub: safeRubSchema.optional(),
   metadata: z
     .object({
       aspectRatio: z.string().max(160).optional(),
@@ -100,6 +111,8 @@ export const generationItemSchema = z.object({
       generateAudio: z.boolean().optional(),
       instrumental: z.boolean().optional(),
       lyrics: boundedText.optional(),
+      provider: providerChoiceSchema.optional(),
+      providerOptions: z.array(providerChoiceSchema).max(100).optional(),
       resolution: z.string().max(160).optional(),
       seed: z.number().int().optional(),
       sunoStyle: boundedText.optional(),
@@ -110,6 +123,7 @@ export const generationItemSchema = z.object({
   outputUrls: z.array(mediaUrlSchema).max(20),
   pricingSource: z.enum(["actual", "estimated"]).nullable().optional(),
   prompt: boundedText,
+  reserveCostRub: safeRubSchema.optional(),
   stage: z.enum([
     "queued",
     "submitting",
@@ -135,7 +149,9 @@ export const quoteResponseSchema = z.object({
     estimatedCostRub: rubSchema,
     expiresAt: z.iso.datetime({ offset: true }),
     id: z.uuid(),
-    maxCostRub: rubSchema,
+    provider: providerChoiceSchema,
+    providerOptions: z.array(providerChoiceSchema).max(100),
+    reserveCostRub: rubSchema,
   }),
 });
 export const apiErrorSchema = z.object({ error: boundedText });

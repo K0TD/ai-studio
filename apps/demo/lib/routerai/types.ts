@@ -24,6 +24,8 @@ export interface GenerationMetadata {
   error?: string;
   pollingUrl?: string;
   seed?: number;
+  provider?: { tag: string; name: string; estimatedCostRub: string };
+  providerOptions?: { tag: string; name: string; estimatedCostRub: string }[];
 }
 
 export interface GenerationItem {
@@ -46,7 +48,7 @@ export interface GenerationItem {
     | "failed";
   costRub: number;
   estimatedCostRub?: string;
-  maxCostRub?: string;
+  reserveCostRub?: string;
   chargedCostRub?: string | null;
   pricingSource?: "actual" | "estimated" | null;
   // mp4, png/jpg/svg/base64, mp3
@@ -92,6 +94,10 @@ export interface ModelMetadata {
   supportsSeed?: boolean;
   supportsNegativePrompt?: boolean;
   supportedVoices?: string[];
+  supportedInputTypes?: ("image" | "video" | "audio")[];
+  maxReferenceCount?: number;
+  supportsFrameReferences?: boolean;
+  framesExclusiveWithReferences?: boolean;
   vectorPriceRub?: number;
 }
 
@@ -117,6 +123,8 @@ export interface VideoGenerateRequest {
   }[];
   heygen_voice_id?: string;
   provider?: {
+    only?: string[];
+    allow_fallbacks?: boolean;
     options?: {
       heygen?: {
         voice_id?: string;
@@ -137,10 +145,14 @@ export interface ImageGenerateRequest {
   seed?: number;
   negative_prompt?: string;
   input_references?: {
-    type: "image_url" | "file";
+    type: "image_url";
     image_url?: { url: string };
     file?: { file_id: string };
   }[];
+  provider?: {
+    only?: string[];
+    allow_fallbacks?: boolean;
+  };
 }
 
 export interface SpeechGenerateRequest {
@@ -149,6 +161,10 @@ export interface SpeechGenerateRequest {
   voice: string;
   response_format?: "mp3" | "pcm";
   speed?: number;
+  provider?: {
+    only?: string[];
+    allow_fallbacks?: boolean;
+  };
 }
 
 export interface SunoGenerateRequest {

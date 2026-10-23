@@ -33,7 +33,9 @@ import { generationRequestSchema, submitRequestSchema } from "./contracts";
 import type { ChatRow, JobRow } from "./rows";
 import {
   createQuote,
+  createRetryQuote,
   submitGeneration,
+  submitRetryGeneration,
   getJob,
   listJobs,
   jobItem,
@@ -53,20 +55,28 @@ const idFrom = async (context: Context) => {
 export const quotePost = apiRoute(async (request) => {
   const user = await requireUser(request);
   await rateLimit(`quote:${user.id}`, 60, 60);
-  const body = await readJson(request, generationRequestSchema);
+  const body = await readJson(
+    request,
+    generationRequestSchema.extend({
+      providerTag: z.string().min(1).max(160).optional(),
+    })
+  );
+  const { providerTag, ...generation } = body;
   let quote: Awaited<ReturnType<typeof createQuote>>;
   try {
-    quote = await createQuote(user, body);
+    quote = await createQuote(user, generation, providerTag);
   } catch (error) {
     console.warn(
       JSON.stringify({
         errorType: error instanceof Error ? error.name : "UnknownError",
         event: "generation.quote_rejected",
-        hasFrameReferences: Boolean(body.settings.frameImages?.length),
-        hasImageReferences: Boolean(body.settings.inputReferences?.length),
-        modelId: body.modelId,
+        hasFrameReferences: Boolean(generation.settings.frameImages?.length),
+        hasImageReferences: Boolean(
+          generation.settings.inputReferences?.length
+        ),
+        modelId: generation.modelId,
         requestId: currentRequestId(),
-        tab: body.tab,
+        tab: generation.tab,
       })
     );
     throw error;
@@ -75,11 +85,12 @@ export const quotePost = apiRoute(async (request) => {
     JSON.stringify({
       estimatedCostRub: quote.estimatedCostRub,
       event: "generation.quote_created",
-      maxCostRub: quote.maxCostRub,
-      modelId: body.modelId,
+      modelId: generation.modelId,
+      providerTag: quote.provider.tag,
       quoteId: quote.id,
       requestId: currentRequestId(),
-      tab: body.tab,
+      reserveCostRub: quote.reserveCostRub,
+      tab: generation.tab,
     })
   );
   return Response.json({
@@ -119,9 +130,9 @@ export const generatePost = apiRoute(async (request) => {
     JSON.stringify({
       event: "generation.accepted",
       jobId: item.id,
-      maxCostRub: item.maxCostRub,
       modelId: item.modelId,
       requestId: currentRequestId(),
+      reserveCostRub: item.reserveCostRub,
       status: item.status,
       tab: item.tab,
     })
@@ -151,6 +162,35 @@ export const jobsGet = apiRoute(async (request) => {
 export const jobGet = apiRoute(async (request, context: Context) => {
   const user = await requireUser(request);
   return Response.json({ item: await getJob(user.id, await idFrom(context)) });
+});
+export const retryQuotePost = apiRoute(async (request, context: Context) => {
+  const user = await requireUser(request);
+  await rateLimit(`retry-quote:${user.id}`, 20, 60);
+  const { providerTag } = await readJson(
+    request,
+    z.strictObject({ providerTag: z.string().min(1).max(160) })
+  );
+  const quote = await createRetryQuote(
+    user,
+    await idFrom(context),
+    providerTag
+  );
+  return Response.json({ quote });
+});
+export const retryGeneratePost = apiRoute(async (request, context: Context) => {
+  const user = await requireUser(request);
+  await rateLimit(`retry-generate:${user.id}`, 10, 60);
+  const { quoteId } = await readJson(
+    request,
+    z.strictObject({ quoteId: z.string().uuid() })
+  );
+  const item = await submitRetryGeneration(
+    user,
+    await idFrom(context),
+    quoteId,
+    idempotencyKey(request)
+  );
+  return Response.json({ item }, { status: 202 });
 });
 export const modelsGet = apiRoute(async (request) => {
   const user = await requireUser(request);
@@ -247,12 +287,13 @@ export const chatDelete = apiRoute(async (request, context: Context) => {
 });
 export const filesPost = apiRoute(async (request) => {
   const user = await requireUser(request);
-  await rateLimit(`upload:${user.id}`, 10, 60);
+  await rateLimit(`upload:${user.id}`, 30, 60);
   const uploadAllowed =
     user.role === "admin" ||
     user.role === "vip" ||
+    !user.permissions?.sections?.length ||
     user.permissions?.sections?.some(
-      (s: string) => s === "video" || s === "image"
+      (s: string) => s === "video" || s === "image" || s === "audio"
     );
   if (!user.isApproved || !uploadAllowed) {
     throw new ApiError(403, "Загрузка референсов недоступна");
@@ -268,7 +309,7 @@ export const filesPost = apiRoute(async (request) => {
       MAX_UPLOAD_BYTES + 65_536
     );
   } catch {
-    throw new ApiError(413, "Изображение должно быть не больше 10 МБ");
+    throw new ApiError(413, "Файл должен быть не больше 20 МБ");
   }
   const form = await new Response(new Uint8Array(buffer), {
     headers: { "content-type": type },
@@ -279,7 +320,7 @@ export const filesPost = apiRoute(async (request) => {
     [...form.keys()].some((key) => key !== "file") ||
     form.getAll("file").length !== 1
   ) {
-    throw new ApiError(400, "Передайте один файл");
+    throw new ApiError(400, "Передайте один файл за раз");
   }
   const bytes = Buffer.from(await file.arrayBuffer());
   const mime = validateUpload(file, bytes);
@@ -300,7 +341,13 @@ export const filesPost = apiRoute(async (request) => {
     throw error;
   }
   return Response.json(
-    { filename, id, url: `/api/k0td-ai/files/${id}/content` },
+    {
+      filename,
+      id,
+      mimeType: mime,
+      sizeBytes: bytes.length,
+      url: `/api/k0td-ai/files/${id}/content`,
+    },
     { status: 201 }
   );
 });

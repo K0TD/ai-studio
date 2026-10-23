@@ -12,6 +12,18 @@ import { ModelAvailability } from "../shell/model-availability";
 import { uploadReference } from "../shell/syntx-api";
 const input =
   "w-full rounded-lg border border-border bg-background p-2 text-xs";
+const durationFor = (value: number, supported: number[] | undefined) => {
+  if (!supported?.length) {
+    return Math.max(1, Math.min(30, value));
+  }
+  let closest = supported[0] ?? value;
+  for (const candidate of supported) {
+    if (Math.abs(candidate - value) < Math.abs(closest - value)) {
+      closest = candidate;
+    }
+  }
+  return closest;
+};
 interface VideoParametersProps {
   selectedModel: ModelMetadata;
 }
@@ -31,7 +43,7 @@ const VideoDuration = ({ selectedModel }: VideoParametersProps) => {
             }
             max={
               selectedModel.supportedDurations?.length
-                ? Math.max(...selectedModel.supportedDurations, 30)
+                ? Math.max(...selectedModel.supportedDurations)
                 : 30
             }
             value={videoSettings.duration}
@@ -39,7 +51,7 @@ const VideoDuration = ({ selectedModel }: VideoParametersProps) => {
               const val = Number.parseInt(e.target.value, 10);
               if (!Number.isNaN(val)) {
                 updateVideoSettings({
-                  duration: Math.max(1, Math.min(60, val)),
+                  duration: durationFor(val, selectedModel.supportedDurations),
                 });
               }
             }}
@@ -63,9 +75,14 @@ const VideoDuration = ({ selectedModel }: VideoParametersProps) => {
           }
           step={1}
           value={videoSettings.duration}
-          onChange={(e) =>
-            updateVideoSettings({ duration: Number(e.target.value) })
-          }
+          onChange={(e) => {
+            updateVideoSettings({
+              duration: durationFor(
+                Number(e.target.value),
+                selectedModel.supportedDurations
+              ),
+            });
+          }}
           className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-muted accent-[#f05138]"
         />
       </div>

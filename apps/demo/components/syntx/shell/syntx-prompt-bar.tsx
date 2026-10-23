@@ -1,11 +1,14 @@
 "use client";
 import {
   ArrowUp,
+  FileAudio2,
+  FileVideo2,
   Loader2,
   Paperclip,
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { z } from "zod";
@@ -35,8 +38,10 @@ import { formatRub } from "./syntx-format";
 interface Quote {
   id: string;
   estimatedCostRub: string;
-  maxCostRub: string;
+  reserveCostRub: string;
   expiresAt: string;
+  provider: { tag: string; name: string; estimatedCostRub: string };
+  providerOptions: { tag: string; name: string; estimatedCostRub: string }[];
 }
 interface Submission {
   serialized: string;
@@ -70,20 +75,11 @@ const postStudio = async <T,>(
   }
   return schema.parse(data);
 };
-const videoRequest = (
+const videoFrameInputs = (
   settings: VideoSettings,
   model: ModelMetadata | undefined,
-  attachment: UploadedReference | null
-): GenerationSettings => {
-  const result: GenerationSettings = {
-    aspectRatio: settings.aspectRatio,
-    duration: settings.duration,
-    generateAudio: !!model?.supportsAudio && settings.generateAudio,
-    heygenVoiceId: settings.heygenVoiceId,
-    negativePrompt: settings.negativePrompt,
-    resolution: settings.resolution,
-    seed: settings.seed,
-  };
+  attachments: UploadedReference[]
+): NonNullable<GenerationSettings["frameImages"]> => {
   const frameImages: NonNullable<GenerationSettings["frameImages"]> = [];
   if (
     settings.firstFrameUrl &&
@@ -105,17 +101,61 @@ const videoRequest = (
       type: "image_url",
     });
   }
-  result.frameImages = frameImages;
-  if (attachment && model?.supportsReferences) {
-    result.inputReferences = [
-      { file: { file_id: attachment.id }, type: "file" },
-    ];
+  const attachmentsBecomeFrames =
+    model?.supportsFrameReferences && !model.supportsReferences;
+  if (attachmentsBecomeFrames || model?.framesExclusiveWithReferences) {
+    const images = attachments.filter((file) =>
+      file.mimeType.startsWith("image/")
+    );
+    const usedFrames = new Set(frameImages.map((frame) => frame.frame_type));
+    const frameSlots = (model?.supportedFrameImages ?? []).filter(
+      (frame): frame is "first_frame" | "last_frame" =>
+        (frame === "first_frame" || frame === "last_frame") &&
+        !usedFrames.has(frame)
+    );
+    for (const [index, frame] of frameSlots.entries()) {
+      const image = images[index];
+      if (!image) {
+        break;
+      }
+      frameImages.push({
+        frame_type: frame,
+        image_url: { url: image.url },
+        type: "image_url",
+      });
+    }
   }
-  return result;
+  return frameImages;
+};
+const videoRequest = (
+  settings: VideoSettings,
+  model: ModelMetadata | undefined,
+  attachments: UploadedReference[]
+): GenerationSettings => {
+  const frameImages = videoFrameInputs(settings, model, attachments);
+  const shouldUseFileReferences =
+    model?.supportsReferences &&
+    !(model.framesExclusiveWithReferences && attachments.length > 0);
+  return {
+    aspectRatio: settings.aspectRatio,
+    duration: settings.duration,
+    frameImages,
+    generateAudio: !!model?.supportsAudio && settings.generateAudio,
+    heygenVoiceId: settings.heygenVoiceId,
+    inputReferences: shouldUseFileReferences
+      ? attachments.map((attachment) => ({
+          file: { file_id: attachment.id },
+          type: "file" as const,
+        }))
+      : undefined,
+    negativePrompt: settings.negativePrompt,
+    resolution: settings.resolution,
+    seed: settings.seed,
+  };
 };
 const imageRequest = (
   settings: ImageSettings,
-  attachment: UploadedReference | null,
+  attachments: UploadedReference[],
   supportsReferences: boolean
 ): GenerationSettings => {
   const result: GenerationSettings = {
@@ -131,10 +171,13 @@ const imageRequest = (
   if (!supportsReferences) {
     return result;
   }
-  if (attachment) {
-    result.inputReferences = [
-      { file: { file_id: attachment.id }, type: "file" },
-    ];
+  if (attachments.length) {
+    result.inputReferences = attachments
+      .filter((attachment) => attachment.mimeType.startsWith("image/"))
+      .map((attachment) => ({
+        file: { file_id: attachment.id },
+        type: "file",
+      }));
   } else if (settings.referenceImageUrl) {
     result.inputReferences = [
       { image_url: { url: settings.referenceImageUrl }, type: "image_url" },
@@ -144,7 +187,7 @@ const imageRequest = (
 };
 const promptRequest = (
   state: K0tdStoreState,
-  attachment: UploadedReference | null
+  attachments: UploadedReference[]
 ): GenerateRequest | null => {
   const common = { chatId: state.activeChatId, prompt: state.prompt.trim() };
   if (state.activeTab === "video") {
@@ -154,7 +197,7 @@ const promptRequest = (
     return {
       ...common,
       modelId: state.videoSettings.modelId,
-      settings: videoRequest(state.videoSettings, model, attachment),
+      settings: videoRequest(state.videoSettings, model, attachments),
       tab: "video",
     };
   }
@@ -167,7 +210,7 @@ const promptRequest = (
       modelId: state.imageSettings.modelId,
       settings: imageRequest(
         state.imageSettings,
-        attachment,
+        attachments,
         model?.supportsReferences === true
       ),
       tab: "image",
@@ -221,6 +264,7 @@ const useChatInitialization = (
 };
 const useQuote = (
   request: GenerateRequest | null,
+  providerTag: string | undefined,
   allowed: boolean,
   generating: boolean
 ) => {
@@ -231,7 +275,7 @@ const useQuote = (
   const [quoteError, setError] = useState("");
   const [quoting, setQuoting] = useState(false);
   const [tick, setTick] = useState(0);
-  const serialized = JSON.stringify(request);
+  const serialized = JSON.stringify({ ...request, providerTag });
   const ready = !!request?.prompt && !!request.chatId && allowed && !generating;
   useEffect(() => {
     const timer = setInterval(() => setTick((value) => value + 1), 30_000);
@@ -293,7 +337,10 @@ const useSubmission = (
 ) => {
   const state = useSyntxStore();
   const submission = useRef<Submission | null>(null);
-  const serialized = JSON.stringify(request);
+  const serialized = JSON.stringify({
+    providerTag: quote?.provider.tag,
+    request,
+  });
   const hasRetry = submission.current?.serialized === serialized;
   const quoteReady = validQuote(quote, state.user?.availableRub ?? "0.00");
   const generate = async () => {
@@ -367,12 +414,14 @@ const QuoteSummary = ({
   quote,
   prompt,
   available,
+  onProviderChange,
 }: {
   allowed: boolean;
   error: string;
   quote: Quote | null;
   prompt: string;
   available: string;
+  onProviderChange: (tag: string) => void;
 }) => {
   let message = "Стоимость появится после ввода промпта";
   if (!allowed) {
@@ -380,10 +429,12 @@ const QuoteSummary = ({
       "👑 Для этой модели требуется статус VIP. Переключитесь на бюджетную модель или обратитесь к администратору.";
   } else if (error) {
     message = error;
-  } else if (quote && Number(available) < Number(quote.maxCostRub)) {
+  } else if (Number(available) < 0) {
+    message = `Баланс в долге на ${formatRub(Math.abs(Number(available)))}. Пополните счёт, чтобы продолжить генерацию.`;
+  } else if (quote && Number(available) < Number(quote.reserveCostRub)) {
     message = "Недостаточно доступного баланса. Обратитесь к администратору.";
   } else if (quote) {
-    message = `Оценка ${formatRub(Number(quote.estimatedCostRub))} · Резерв до ${formatRub(Number(quote.maxCostRub))} · Доступно ${formatRub(Number(available))}`;
+    message = `Оценка ${formatRub(Number(quote.estimatedCostRub))} · Провайдер ${quote.provider.name} · Резерв ${formatRub(Number(quote.reserveCostRub))} · Фактическое списание по RouterAI · Доступно ${formatRub(Number(available))}`;
   } else if (prompt.trim()) {
     message = "Рассчитываем стоимость…";
   }
@@ -393,54 +444,258 @@ const QuoteSummary = ({
       className="mt-2 block text-center text-xs text-syntx-muted"
     >
       {message}
+      {quote && quote.providerOptions.length > 1 && (
+        <label className="ml-2 inline-flex items-center gap-1">
+          <span>Провайдер:</span>
+          <select
+            aria-label="Провайдер генерации"
+            className="rounded-md border border-syntx-line bg-syntx-surface px-1 py-0.5"
+            value={quote.provider.tag}
+            onChange={(event) => onProviderChange(event.target.value)}
+          >
+            {quote.providerOptions.map((option) => (
+              <option key={option.tag} value={option.tag}>
+                {option.name} · {formatRub(Number(option.estimatedCostRub))}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </output>
   );
 };
 const AttachmentControl = ({
   disabled,
-  onChange,
+  attachments,
+  maxCount,
+  supportedTypes,
+  onAdd,
+  onRemove,
   onBusy,
 }: {
   disabled: boolean;
-  onChange: (reference: UploadedReference) => void;
+  attachments: UploadedReference[];
+  maxCount: number;
+  supportedTypes: string[];
+  onAdd: (references: UploadedReference[]) => void;
+  onRemove: (id: string) => void;
   onBusy: (value: boolean) => void;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
-  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) {
       return;
     }
+    const previousFocus = document.activeElement;
+    dialogRef.current
+      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      if (previousFocus instanceof HTMLElement) {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
+  const accept = supportedTypes
+    .flatMap((type) => {
+      if (type === "image") {
+        return ["image/png", "image/jpeg", "image/webp"];
+      }
+      if (type === "video") {
+        return ["video/mp4"];
+      }
+      if (type === "audio") {
+        return [
+          "audio/mpeg",
+          "audio/mp4",
+          "audio/wav",
+          "audio/flac",
+          "audio/ogg",
+        ];
+      }
+      return [];
+    })
+    .join(",");
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = [...(event.target.files ?? [])];
+    event.target.value = "";
+    if (!files.length) {
+      return;
+    }
+    const allowedSlots = Math.max(0, maxCount - attachments.length);
+    const selected = files.slice(0, allowedSlots);
+    if (files.length > allowedSlots) {
+      toast.error(`Можно добавить не больше ${maxCount} файлов`);
+    }
+    const currentBytes = attachments.reduce(
+      (sum, file) => sum + file.sizeBytes,
+      0
+    );
+    let acceptedBytes = currentBytes;
     onBusy(true);
+    setBusy(true);
     try {
-      onChange(await uploadReference(file));
+      const uploaded: UploadedReference[] = [];
+      for (const file of selected) {
+        if (file.size > 20 * 1024 * 1024) {
+          toast.error(`${file.name}: размер файла больше 20 МБ`);
+          continue;
+        }
+        if (acceptedBytes + file.size > 24 * 1024 * 1024) {
+          toast.error("Общий размер вложений не должен превышать 24 МБ");
+          break;
+        }
+        try {
+          const result = await uploadReference(file);
+          acceptedBytes += result.sizeBytes;
+          uploaded.push(result);
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `${file.name}: ${error.message}`
+              : `${file.name}: загрузка не удалась`
+          );
+        }
+      }
+      if (uploaded.length) {
+        onAdd(uploaded);
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Загрузка не удалась"
       );
     } finally {
       onBusy(false);
+      setBusy(false);
     }
   };
   return (
     <>
       <button
         type="button"
-        aria-label="Прикрепить референс"
+        aria-label="Открыть вложения"
+        aria-haspopup="dialog"
         disabled={disabled}
         className="rounded-lg p-2 disabled:opacity-40"
-        onClick={() => inputRef.current?.click()}
+        onClick={() => setOpen(true)}
       >
         <Paperclip className="size-4" />
+        {attachments.length > 0 && (
+          <span className="ml-1 text-xs">{attachments.length}</span>
+        )}
       </button>
       <input
-        accept="image/png,image/jpeg,image/webp,video/mp4"
+        accept={accept}
         className="hidden"
         onChange={upload}
         ref={inputRef}
+        multiple
         type="file"
       />
+      {open && (
+        <dialog
+          open
+          ref={dialogRef}
+          aria-label="Вложения генерации"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] m-0 flex h-full w-full max-w-none items-end justify-center border-0 bg-black/40 p-3 sm:items-center"
+        >
+          <section className="w-full max-w-xl rounded-2xl border border-syntx-line bg-syntx-surface p-4 shadow-2xl">
+            <header className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Вложения</h2>
+                <p className="text-xs text-syntx-muted">
+                  {attachments.length} / {maxCount} · до 20 МБ на файл · 24 МБ
+                  всего
+                </p>
+              </div>
+              <button
+                aria-label="Закрыть вложения"
+                className="rounded-lg p-2 hover:bg-black/5"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </header>
+            {attachments.length ? (
+              <ul className="mb-3 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+                {attachments.map((attachment) => (
+                  <li
+                    className="group relative overflow-hidden rounded-xl border border-syntx-line bg-syntx-bg"
+                    key={attachment.id}
+                  >
+                    {attachment.mimeType.startsWith("image/") ? (
+                      <Image
+                        alt={attachment.filename}
+                        className="h-28 w-full object-cover"
+                        height={224}
+                        unoptimized
+                        src={attachment.url}
+                        width={320}
+                      />
+                    ) : (
+                      <div className="flex h-28 items-center justify-center text-syntx-muted">
+                        {attachment.mimeType.startsWith("video/") ? (
+                          <FileVideo2 className="size-8" />
+                        ) : (
+                          <FileAudio2 className="size-8" />
+                        )}
+                      </div>
+                    )}
+                    <div className="truncate px-2 py-1.5 text-[11px]">
+                      {attachment.filename}
+                      <span className="block text-syntx-muted">
+                        {(attachment.sizeBytes / 1024 / 1024).toFixed(1)} МБ
+                      </span>
+                    </div>
+                    <button
+                      aria-label={`Удалить ${attachment.filename}`}
+                      className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                      onClick={() => onRemove(attachment.id)}
+                      type="button"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mb-3 rounded-xl border border-dashed border-syntx-line px-4 py-8 text-center text-xs text-syntx-muted">
+                Добавьте изображение, видео или аудио. Доступные форматы зависят
+                от модели.
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-syntx-line px-3 py-2 text-xs"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                Готово
+              </button>
+              <button
+                className="rounded-lg bg-syntx-ink px-3 py-2 text-xs text-white disabled:opacity-40"
+                disabled={busy || attachments.length >= maxCount}
+                onClick={() => inputRef.current?.click()}
+                type="button"
+              >
+                {busy ? "Загружаем…" : "Добавить файлы"}
+              </button>
+            </div>
+          </section>
+        </dialog>
+      )}
     </>
   );
 };
@@ -454,6 +709,24 @@ const PromptParameters = ({ state }: { state: K0tdStoreState }) => {
   }
   return <span className="text-xs text-syntx-muted">{text}</span>;
 };
+const attachmentTypesFor = (
+  tab: K0tdStoreState["activeTab"],
+  model: ModelMetadata
+): string[] => {
+  if (tab === "image") {
+    return ["image"];
+  }
+  if (model.supportsReferences && !model.framesExclusiveWithReferences) {
+    return model.supportedInputTypes ?? ["image"];
+  }
+  return ["image"];
+};
+const modelAcceptsAttachments = (
+  tab: K0tdStoreState["activeTab"],
+  model: ModelMetadata | undefined
+) =>
+  tab !== "audio" &&
+  Boolean(model?.supportsReferences || model?.supportsFrameReferences);
 const GenerationButton = ({
   generating,
   quoting,
@@ -499,20 +772,29 @@ export const SyntxPromptBar = ({
 }) => {
   const state = useSyntxStore();
   const [uploading, setUploading] = useState(false);
-  const [attachment, setAttachment] = useState<UploadedReference | null>(null);
-  const request = promptRequest(state, attachment);
+  const [attachments, setAttachments] = useState<UploadedReference[]>([]);
+  const [providerTag, setProviderTag] = useState<string>();
+  const request = promptRequest(state, attachments);
   const model = state.models.find(
     (candidate) => candidate.id === request?.modelId
   );
+  const canAttach = modelAcceptsAttachments(state.activeTab, model);
   useEffect(() => {
-    if (attachment && !model?.supportsReferences) {
-      setAttachment(null);
+    const supportsAttachments =
+      model?.supportsReferences || model?.supportsFrameReferences;
+    if (attachments.length && !supportsAttachments) {
+      setAttachments([]);
     }
-  }, [attachment, model?.supportsReferences]);
+  }, [
+    attachments.length,
+    model?.supportsReferences,
+    model?.supportsFrameReferences,
+  ]);
   const allowed = !!request && modelAllowed(state.user, model);
   useChatInitialization(request, allowed);
   const { quote, error, quoting } = useQuote(
     request,
+    providerTag,
     allowed,
     state.isGenerating
   );
@@ -521,7 +803,7 @@ export const SyntxPromptBar = ({
     allowed,
     quote,
     uploading,
-    () => setAttachment(null)
+    () => setAttachments([])
   );
   const keyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -533,19 +815,6 @@ export const SyntxPromptBar = ({
     <div className="relative z-20 shrink-0 px-3 pb-3 sm:px-5 sm:pb-5">
       <div className="mx-auto max-w-4xl">
         <div className="rounded-[24px] border border-syntx-line/80 bg-syntx-surface/90 p-2 shadow-[0_24px_60px_-30px_rgba(60,40,20,0.45)] backdrop-blur-2xl">
-          {attachment && (
-            <div className="mb-2 flex items-center gap-2 rounded-xl border p-2 text-xs">
-              <Paperclip className="size-3" />
-              <span className="truncate">{attachment.filename}</span>
-              <button
-                type="button"
-                aria-label="Убрать референс"
-                onClick={() => setAttachment(null)}
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          )}
           <textarea
             aria-label="Промпт генерации"
             id="k0td-prompt-input"
@@ -570,10 +839,23 @@ export const SyntxPromptBar = ({
               {model?.name ?? "Параметры"}
             </button>
             <PromptParameters state={state} />
-            {state.activeTab !== "audio" && (
+            {canAttach && model && (
               <AttachmentControl
-                disabled={uploading || !allowed || !model?.supportsReferences}
-                onChange={setAttachment}
+                disabled={uploading || !allowed}
+                attachments={attachments}
+                maxCount={
+                  model.maxReferenceCount ??
+                  (model.supportsFrameReferences ? 2 : 4)
+                }
+                supportedTypes={attachmentTypesFor(state.activeTab, model)}
+                onAdd={(added) =>
+                  setAttachments((current) => [...current, ...added])
+                }
+                onRemove={(id) =>
+                  setAttachments((current) =>
+                    current.filter((file) => file.id !== id)
+                  )
+                }
                 onBusy={setUploading}
               />
             )}
@@ -594,6 +876,7 @@ export const SyntxPromptBar = ({
           allowed={allowed}
           available={state.user?.availableRub ?? "0.00"}
           error={error}
+          onProviderChange={setProviderTag}
           prompt={state.prompt}
           quote={quote}
         />

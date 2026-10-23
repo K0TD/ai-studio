@@ -12,7 +12,7 @@ if [ "${STUDIO_WRITERS_STOPPED:-}" != "yes" ]; then
   echo "Stop web and worker before restoring." >&2; exit 1
 fi
 test -s "${RESTIC_PASSWORD_FILE:?Missing restic password file}"
-media_root=${MEDIA_ROOT:-/data/media}
+media_root=${MEDIA_ROOT:-/app/storage/generation}
 test -d "$media_root"
 if [ -n "$(find "$media_root" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
   echo "Media target is not empty." >&2; exit 1

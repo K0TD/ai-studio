@@ -4,7 +4,8 @@ import { isAbsolute, resolve, sep } from "node:path";
 
 import { ApiError } from "@/lib/security/http";
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+export const MAX_REFERENCE_TOTAL_BYTES = 24 * 1024 * 1024;
 export const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 
 export const ensureMediaStorage = async (): Promise<void> => {
@@ -44,7 +45,16 @@ const storagePath = (key: string): string => {
   if (!root || !isAbsolute(root)) {
     throw new Error("MEDIA_ROOT must be an absolute private directory");
   }
-  if (!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/u.test(key)) {
+  const segments = key.split("/");
+  if (
+    segments.length < 2 ||
+    segments.some(
+      (segment) =>
+        !/^[a-zA-Z0-9_.-]+$/u.test(segment) ||
+        segment === "." ||
+        segment === ".."
+    )
+  ) {
     throw new Error("Invalid media storage key");
   }
   const path = resolve(root, key);
@@ -68,6 +78,42 @@ export const imageMime = (bytes: Buffer): string | null => {
     bytes.toString("ascii", 8, 12) === "WEBP"
   ) {
     return "image/webp";
+  }
+  return null;
+};
+
+export const uploadMime = (bytes: Buffer): string | null => {
+  const image = imageMime(bytes);
+  if (image) {
+    return image;
+  }
+  if (bytes.length >= 12 && bytes.toString("ascii", 4, 8) === "ftyp") {
+    return ["M4A ", "M4B ", "F4A ", "F4B "].includes(
+      bytes.toString("ascii", 8, 12)
+    )
+      ? "audio/mp4"
+      : "video/mp4";
+  }
+  if (bytes.length >= 3 && bytes.toString("ascii", 0, 3) === "ID3") {
+    return "audio/mpeg";
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] >= 0xe0) {
+    return "audio/mpeg";
+  }
+  if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF") {
+    const format = bytes.toString("ascii", 8, 12);
+    if (format === "WAVE") {
+      return "audio/wav";
+    }
+    if (format === "WEBP") {
+      return "image/webp";
+    }
+  }
+  if (bytes.length >= 4 && bytes.toString("ascii", 0, 4) === "fLaC") {
+    return "audio/flac";
+  }
+  if (bytes.length >= 4 && bytes.toString("ascii", 0, 4) === "OggS") {
+    return "audio/ogg";
   }
   return null;
 };
@@ -198,13 +244,29 @@ export const mediaResponse = async (
 
 export const validateUpload = (file: File, bytes: Buffer): string => {
   if (file.size > MAX_UPLOAD_BYTES || !bytes.length) {
-    throw new ApiError(413, "Изображение должно быть не больше 10 МБ");
+    throw new ApiError(413, "Файл должен быть не больше 20 МБ");
   }
-  const mime = imageMime(bytes);
-  if (!mime || (file.type && file.type !== mime)) {
+  const mime = uploadMime(bytes);
+  const isMimeAlias = (declaredMime: string): boolean => {
+    switch (mime) {
+      case "audio/mp4": {
+        return declaredMime === "audio/m4a" || declaredMime === "audio/x-m4a";
+      }
+      case "audio/mpeg": {
+        return declaredMime === "audio/mp3" || declaredMime === "audio/x-mp3";
+      }
+      case "audio/wav": {
+        return declaredMime === "audio/x-wav" || declaredMime === "audio/wave";
+      }
+      default: {
+        return false;
+      }
+    }
+  };
+  if (!mime || (file.type && file.type !== mime && !isMimeAlias(file.type))) {
     throw new ApiError(
       415,
-      "Допустимы изображения PNG, JPEG и WebP с корректным содержимым"
+      "Поддерживаются PNG, JPEG, WebP, MP4, MP3, WAV, FLAC и OGG с корректным содержимым"
     );
   }
   return mime;

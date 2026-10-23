@@ -22,8 +22,8 @@ export const adminRowSchema = z.object({
   action: text.optional(),
   actorId: identifier.nullable().optional(),
   amountRub: signedRubSchema.optional(),
-  balanceAfterRub: rubSchema.optional(),
-  balanceBeforeRub: rubSchema.optional(),
+  balanceAfterRub: signedRubSchema.optional(),
+  balanceBeforeRub: signedRubSchema.optional(),
   chargedCostRub: rubSchema.nullable().optional(),
   createdAt: z.iso.datetime({ offset: true }).optional(),
   details: z
@@ -61,7 +61,7 @@ export const statsSchema = z.object({
   activeGenerations: z.number().int().nonnegative(),
   routerAiStatus: z.enum(["operational", "degraded", "down"]),
   supportedModelsCount: z.number().int().nonnegative(),
-  totalBalanceRub: z.string().regex(/^\d+(?:\.\d{1,2})?$/u),
+  totalBalanceRub: z.string().regex(/^-?\d+(?:\.\d{1,2})?$/u),
   totalSpentTodayRub: z.string().regex(/^\d+(?:\.\d{1,2})?$/u),
   totalUsers: z.number().int().nonnegative(),
 });

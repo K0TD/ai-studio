@@ -12,6 +12,12 @@ const fixtureRequestSchema = z.object({
     })
     .optional(),
   modalities: z.array(z.string()).optional(),
+  provider: z
+    .object({
+      allow_fallbacks: z.boolean().optional(),
+      only: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 class FixtureClient extends RouterAIClient {
   requests: { path: string; body?: z.infer<typeof fixtureRequestSchema> }[] =
@@ -36,6 +42,15 @@ const image = "iVBORw0KGgo=";
 const dataUrl = `data:image/png;base64,${image}`;
 
 describe("RouterAI image and speech response contracts", () => {
+  test("reads actual billing for binary endpoints by generation ID", async () => {
+    const client = new FixtureClient(() =>
+      Response.json({ total_cost: "105.46" })
+    );
+    await expect(client.getGenerationCost("speech-result")).resolves.toBe(
+      105.46
+    );
+    expect(client.requests[0].path).toBe("/generation?id=speech-result");
+  });
   test("native images return bytes, exact cost and generation ID from headers", async () => {
     const client = new FixtureClient(() =>
       Response.json(
@@ -77,10 +92,15 @@ describe("RouterAI image and speech response contracts", () => {
       input_references: [{ image_url: { url: dataUrl }, type: "image_url" }],
       model: "google/gemini-3.1-flash-image-preview",
       prompt: "test",
+      provider: { allow_fallbacks: false, only: ["routerai-fixture"] },
       resolution: "2K",
     });
     expect(client.requests[0].path).toBe("/chat/completions");
     expect(client.requests[0].body?.modalities).toEqual(["image", "text"]);
+    expect(client.requests[0].body?.provider).toEqual({
+      allow_fallbacks: false,
+      only: ["routerai-fixture"],
+    });
     expect(client.requests[0].body?.image_config).toEqual({
       aspect_ratio: "16:9",
       image_size: "2K",

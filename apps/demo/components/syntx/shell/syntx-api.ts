@@ -54,10 +54,14 @@ export interface UploadedReference {
   url: string;
   filename: string;
   id: string;
+  mimeType: string;
+  sizeBytes: number;
 }
 const uploadResponseSchema = z.object({
   filename: z.string(),
   id: z.string().uuid(),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().positive(),
   url: mediaUrlSchema,
 });
 export const uploadReference = async (

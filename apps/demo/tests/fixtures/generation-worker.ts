@@ -67,6 +67,44 @@ let responseMode:
   | "video"
   | "video-uncertain" = "success";
 const providerResponse = (path: string, init: RequestInit = {}) => {
+  if (path === "/generation?id=gen-speech") {
+    return Response.json({ total_cost: 0.12 });
+  }
+  if (path.endsWith("/endpoints")) {
+    let model = imageModel;
+    if (path.includes("elevenlabs")) {
+      model = speechModel;
+    } else if (path.includes("flux-3-video")) {
+      model = videoModel;
+    }
+    let supportedApi = "/images";
+    if (model === speechModel) {
+      supportedApi = "/audio/speech";
+    } else if (model === videoModel) {
+      supportedApi = "/videos";
+    }
+    return Response.json({
+      data: {
+        endpoints: [
+          {
+            name: "Fixture endpoint",
+            pricing: { image: 4, prompt: 0.1, seconds: 8.8 },
+            pricing_units: {
+              image: "image",
+              prompt: "character",
+              seconds: "second",
+            },
+            provider_name: "Fixture provider",
+            status: 1,
+            supported_apis: [supportedApi],
+            supported_parameters: [],
+            tag: "fixture-provider",
+          },
+        ],
+        id: model,
+      },
+    });
+  }
   if (init.method === "POST") {
     posts += 1;
     if (process.argv[2] === "resume") {
@@ -109,7 +147,7 @@ const providerResponse = (path: string, init: RequestInit = {}) => {
     return Response.json({
       id: "video-fixture",
       status: "completed",
-      usage: { cost: 5.1 },
+      usage: { cost: 105.46 },
     });
   }
   if (path.startsWith("/videos/video-fixture/content")) {
@@ -354,16 +392,22 @@ try {
     const speech = await fixture("audio");
     await workerTick();
     await assertJobStatus(speech.owner.id, speech.item.id, "completed");
-    await assertWallet(speech.owner.id, "99.30", "0.00");
+    await assertWallet(speech.owner.id, "99.88", "0.00");
     const speechItem = await getJob(speech.owner.id, speech.item.id);
-    assert.equal(speechItem.pricingSource, "estimated");
+    assert.equal(speechItem.chargedCostRub, "0.12");
+    assert.equal(speechItem.pricingSource, "actual");
     assert.equal(posts, 4);
 
     responseMode = "video";
     const video = await fixture("video");
+    assert.equal(video.item.estimatedCostRub, "44.00");
+    assert.equal(video.item.reserveCostRub, "52.80");
     await workerTick();
     await assertJobStatus(video.owner.id, video.item.id, "completed");
-    await assertWallet(video.owner.id, "94.90", "0.00");
+    await assertWallet(video.owner.id, "-5.46", "0.00");
+    const billedVideo = await getJob(video.owner.id, video.item.id);
+    assert.equal(billedVideo.chargedCostRub, "105.46");
+    assert.equal(billedVideo.pricingSource, "actual");
     assert.equal(posts, 5);
 
     responseMode = "video-uncertain";
@@ -384,11 +428,12 @@ try {
       uncertainVideo.item.id,
       "completed"
     );
+    await assertWallet(uncertainVideo.owner.id, "-5.46", "0.00");
     assert.equal(posts, 6);
 
     responseMode = "success";
     const retry = await fixture();
-    const blocked = join(mediaRoot, retry.item.id, "0.bin");
+    const blocked = join(mediaRoot, "image", retry.item.id, "0.bin");
     await mkdir(blocked, { recursive: true });
     await workerTick();
     const retryRow = await jobRow(retry.item.id);

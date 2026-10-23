@@ -19,12 +19,11 @@ x-runtime: &runtime
     ADMIN_LOGIN: ${ADMIN_LOGIN:?Set ADMIN_LOGIN}
     ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set a strong ADMIN_PASSWORD}
     ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-    MEDIA_ROOT: ${MEDIA_ROOT:-/data/media}
+    MEDIA_ROOT: /app/storage/generation
     STORAGE_ROOT: /app/storage
     SQLITE_PATH: /app/storage/database/studio.sqlite
     QUOTE_MAXIMUM_MULTIPLIER: ${QUOTE_MAXIMUM_MULTIPLIER:-1.20}
   volumes:
-    - media:/data/media
     - ./storage:/app/storage
   depends_on:
     media-init: { condition: service_completed_successfully }
@@ -64,14 +63,14 @@ services:
     network_mode: none
     security_opt: [no-new-privileges:true]
     volumes:
-      - media:/data/media
+      - media:/legacy-media
       - ./storage:/app/storage
       - backup_work:/work
     command:
       [
         sh,
         -c,
-        "mkdir -p /data/media /app/storage/database /app/storage/logs && chown -R 1001:1001 /data/media /app/storage /work && find /data/media /app/storage /work -type d -exec chmod 0750 {} + && find /data/media /app/storage /work -type f -exec chmod 0640 {} +",
+        "mkdir -p /app/storage/generation/video /app/storage/generation/image /app/storage/generation/audio /app/storage/database /app/storage/logs && if [ -d /legacy-media ]; then cp -an /legacy-media/. /app/storage/generation/; fi && chown -R 1001:1001 /app/storage /work && find /app/storage /work -type d -exec chmod 0750 {} + && find /app/storage /work -type f -exec chmod 0640 {} +",
       ]
 
   web:
@@ -149,7 +148,6 @@ services:
       AWS_DEFAULT_REGION: ${BACKUP_AWS_DEFAULT_REGION:-}
       RESTIC_CACHE_DIR: /work/restic-cache
     volumes:
-      - media:/data/media:ro
       - ./storage:/app/storage:ro
       - backup_work:/work
       - ./secrets/restic-password:/run/secrets/restic_password:ro

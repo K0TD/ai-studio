@@ -27,12 +27,19 @@ export interface CatalogModel extends ModelMetadata {
   supportedVoices?: string[];
   pricingSourceUrl?: string;
   supportsNegativePrompt?: boolean;
+  providerRoute?: ProviderChoice;
+  providerOptions?: ProviderChoice[];
   enabled: boolean;
   available: boolean;
   disabledReason?: string;
   verifiedAt: string | null;
   source: "routerai";
   raw: ProviderModel;
+}
+export interface ProviderChoice {
+  tag: string;
+  name: string;
+  estimatedCostRub: string;
 }
 const CANDIDATES = [...VIDEO_MODELS, ...IMAGE_MODELS, ...AUDIO_MODELS];
 const SPEECH_PAGES = new Map<string, string>(
@@ -141,34 +148,78 @@ const supportedVoices = (id: string): string[] | undefined => {
   }
   return undefined;
 };
-const catalogCapabilities = (raw: ProviderModel) => ({
-  maxImageCount: raw.id.startsWith("google/gemini-")
-    ? 1
-    : Math.min(4, raw.max_image_count ?? 1),
-  supportedAspectRatios: raw.supported_aspect_ratios,
-  supportedBackgrounds: raw.id.startsWith("google/gemini-")
-    ? ["auto"]
-    : (raw.supported_backgrounds ?? ["auto"]),
-  supportedDurations: raw.supported_durations,
-  supportedFrameImages: raw.supported_frame_images ?? [],
-  supportedOutputFormats: raw.id.startsWith("google/gemini-")
-    ? ["png"]
-    : (raw.supported_output_formats ?? ["png", "jpeg", "webp"]),
-  supportedQualities: raw.id.startsWith("google/gemini-")
-    ? ["auto"]
-    : (raw.supported_qualities ?? ["auto"]),
-  supportedResolutions: raw.supported_resolutions ?? raw.supported_image_sizes,
-  supportsAudio: raw.generate_audio === true,
-  supportsNegativePrompt:
-    raw.supports_negative_prompt === true ||
-    raw.supported_parameters?.includes("negativePrompt"),
-  supportsReferences: Boolean(
-    raw.supported_image_references || raw.supports_reference_images
-  ),
-  supportsSeed:
-    !raw.id.startsWith("google/gemini-") &&
-    (raw.seed === true || raw.image_seed === true),
-});
+const isGeminiImage = (raw: ProviderModel) =>
+  raw.id.startsWith("google/gemini-");
+const supportsReferences = (raw: ProviderModel) =>
+  Boolean(
+    raw.supported_image_references ||
+    raw.supports_reference_images ||
+    raw.supported_parameters?.includes("input_references") ||
+    raw.architecture?.input_modalities?.some((modality) =>
+      ["image", "video", "audio"].includes(modality)
+    )
+  );
+const supportedInputTypes = (raw: ProviderModel) => {
+  const modalities = (raw.architecture?.input_modalities ?? []).filter(
+    (type): type is "image" | "video" | "audio" =>
+      type === "image" || type === "video" || type === "audio"
+  );
+  if (
+    raw.supported_image_references ||
+    raw.supports_reference_images ||
+    raw.supported_frame_images?.length
+  ) {
+    modalities.push("image");
+  }
+  return [...new Set(modalities)];
+};
+const maxReferenceCount = (raw: ProviderModel) => {
+  if (raw.max_image_references !== undefined) {
+    return Math.min(30, raw.max_image_references);
+  }
+  return supportsReferences(raw) ? 4 : undefined;
+};
+const supportedFrameImages = (raw: ProviderModel) => {
+  if (raw.supported_frame_images) {
+    return raw.supported_frame_images;
+  }
+  return raw.supported_parameters?.includes("frame_images")
+    ? ["first_frame", "last_frame"]
+    : [];
+};
+const catalogCapabilities = (raw: ProviderModel) => {
+  const geminiImage = isGeminiImage(raw);
+  const frameImages = supportedFrameImages(raw);
+  return {
+    framesExclusiveWithReferences:
+      raw.frames_exclusive_with_references === true,
+    maxImageCount: geminiImage ? 1 : Math.min(4, raw.max_image_count ?? 1),
+    maxReferenceCount: maxReferenceCount(raw),
+    supportedAspectRatios: raw.supported_aspect_ratios,
+    supportedBackgrounds: geminiImage
+      ? ["auto"]
+      : (raw.supported_backgrounds ?? ["auto"]),
+    supportedDurations: raw.supported_durations,
+    supportedFrameImages: frameImages,
+    supportedInputTypes: supportedInputTypes(raw),
+    supportedOutputFormats: geminiImage
+      ? ["png"]
+      : (raw.supported_output_formats ?? ["png", "jpeg", "webp"]),
+    supportedQualities: geminiImage
+      ? ["auto"]
+      : (raw.supported_qualities ?? ["auto"]),
+    supportedResolutions:
+      raw.supported_resolutions ?? raw.supported_image_sizes,
+    supportsAudio: raw.generate_audio === true,
+    supportsFrameReferences: frameImages.length > 0,
+    supportsNegativePrompt:
+      raw.supports_negative_prompt === true ||
+      raw.supported_parameters?.includes("negativePrompt"),
+    supportsReferences: supportsReferences(raw),
+    supportsSeed:
+      !geminiImage && (raw.seed === true || raw.image_seed === true),
+  };
+};
 const catalogBasePrice = (raw: ProviderModel) =>
   Number(
     raw.pricing.seconds ??

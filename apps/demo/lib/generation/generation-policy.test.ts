@@ -48,6 +48,49 @@ describe("Generation boundaries and authoritative pricing", () => {
       }).success
     ).toBe(false);
   });
+  test("Hailuo reference and keyframe capabilities follow RouterAI model metadata", () => {
+    const base = VIDEO_MODELS.find(
+      (model) => model.id === "minimax/hailuo-3-max"
+    );
+    if (!base) {
+      throw new Error("Missing Hailuo fixture");
+    }
+    const model = normalizeCatalogModel(
+      base,
+      {
+        architecture: { input_modalities: ["text", "image"] },
+        frames_exclusive_with_references: true,
+        pricing: { seconds: 1 },
+        pricing_units: { seconds: "second" },
+        supported_parameters: ["frame_images"],
+      },
+      new Date().toISOString()
+    );
+    expect(model.supportsReferences).toBe(true);
+    expect(model.supportsFrameReferences).toBe(true);
+    expect(model.supportedFrameImages).toEqual(["first_frame", "last_frame"]);
+    const normalized = normalizedSettings(
+      {
+        ...request,
+        modelId: model.id,
+        prompt: "Видео",
+        settings: {
+          frameImages: [
+            {
+              frame_type: "first_frame",
+              image_url: {
+                url: "/api/k0td-ai/files/00000000-0000-4000-8000-000000000001/content",
+              },
+              type: "image_url",
+            },
+          ],
+        },
+        tab: "video",
+      },
+      model
+    );
+    expect(normalized.frameImages).toHaveLength(1);
+  });
   test("idempotency hash is independent of object property insertion order", () => {
     expect(requestHash(request)).toBe(
       requestHash({

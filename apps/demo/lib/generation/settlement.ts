@@ -43,13 +43,9 @@ const settlementAmounts = (
     nominal = 0n;
   }
   const held = parseRub(job.max_cost_rub);
-  const charged = nominal > held ? held : nominal;
+  const charged = nominal;
   const after = parseRub(owner.balance_rub) - charged;
-  if (
-    !failedFree &&
-    (parseRub(owner.reserved_rub) < held ||
-      after < parseRub(owner.reserved_rub) - held)
-  ) {
+  if (!failedFree && parseRub(owner.reserved_rub) < held) {
     throw new Error("Wallet reservation invariant violated");
   }
   let varianceValue = nominal > held ? nominal - held : 0n;
