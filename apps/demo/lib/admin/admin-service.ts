@@ -117,7 +117,7 @@ export const AdminService = {
     };
   },
   async getStats(): Promise<SystemStats> {
-    const totals = await pool.query<SystemStats>(`select
+    const totals = await pool.query<any>(`select
       (select cast(count(*) as integer) from "user") as "totalUsers",
       (select cast(coalesce(sum(balance_rub),0) as text) from "user") as "totalBalanceRub",
       (select cast(coalesce(-sum(amount_rub),0) as text) from transactions where type='generation_cost'
@@ -125,7 +125,16 @@ export const AdminService = {
       (select cast(count(*) as integer) from syntx_jobs where settled_at is null) as "activeGenerations",
       (select cast(count(*) as integer) from syntx_catalog) as "supportedModelsCount",
       case when exists(select 1 from syntx_catalog where verified_at > now()-interval '24 hours') then 'operational' else 'down' end as "routerAiStatus"`);
-    return totals.rows[0];
+    const raw = totals.rows[0] ?? {};
+    const { formatKopecks, parseRub } = await import("../billing/money");
+    return {
+      activeGenerations: Number(raw.activeGenerations ?? 0),
+      routerAiStatus: raw.routerAiStatus ?? "down",
+      supportedModelsCount: Number(raw.supportedModelsCount ?? 0),
+      totalBalanceRub: formatKopecks(parseRub(String(raw.totalBalanceRub ?? "0.00"))),
+      totalSpentTodayRub: formatKopecks(parseRub(String(raw.totalSpentTodayRub ?? "0.00"))),
+      totalUsers: Number(raw.totalUsers ?? 0),
+    };
   },
   async getTransactions(query: {
     userId?: string;

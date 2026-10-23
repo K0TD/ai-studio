@@ -2,6 +2,7 @@ import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { formatKopecks, parseRub } from "../billing/money";
 import { db, isPostgres } from "../db";
 import * as pgSchema from "../db/schema";
 import * as sqliteSchema from "../db/sqlite-schema";
@@ -58,7 +59,9 @@ export const synchronizeAdmin = async (
 
     const needsBalance =
       !existing || !existing.balanceRub || existing.balanceRub === "0.00";
-    const initialBalance = needsBalance ? "10000.00" : existing.balanceRub;
+    const initialBalance = needsBalance
+      ? "10000.00"
+      : formatKopecks(parseRub(String(existing.balanceRub)));
 
     const changed =
       !existing ||

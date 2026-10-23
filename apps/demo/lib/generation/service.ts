@@ -137,14 +137,23 @@ export const createQuote = async (
 
 export const jobItem = (row: JobRow, artifacts: { id: string }[] = []) => {
   const settings = row.request?.settings ?? {};
+  const charged = row.charged_cost_rub
+    ? formatKopecks(parseRub(String(row.charged_cost_rub)))
+    : null;
+  const estimated = row.estimated_cost_rub
+    ? formatKopecks(parseRub(String(row.estimated_cost_rub)))
+    : undefined;
+  const maxCost = row.max_cost_rub
+    ? formatKopecks(parseRub(String(row.max_cost_rub)))
+    : undefined;
   return {
-    chargedCostRub: row.charged_cost_rub,
+    chargedCostRub: charged,
     chatId: row.chat_id,
-    costRub: Number(row.charged_cost_rub ?? row.estimated_cost_rub),
+    costRub: Number(charged ?? estimated ?? 0),
     createdAt: toIsoDate(row.created_at),
-    estimatedCostRub: row.estimated_cost_rub,
+    estimatedCostRub: estimated,
     id: row.id,
-    maxCostRub: row.max_cost_rub,
+    maxCostRub: maxCost,
     metadata: {
       aspectRatio: settings.aspectRatio,
       audioVoice: settings.voiceId,

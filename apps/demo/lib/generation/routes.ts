@@ -375,7 +375,7 @@ export const adminJobsGet = apiRoute(async (request) => {
     })),
     limit,
     page,
-    total: count.total,
+    total: Number(count?.total ?? 0),
   });
 });
 export const adminJobReconcilePost = apiRoute(

@@ -470,25 +470,46 @@ export const ensureDatabase = async (): Promise<void> => {
         provider: isPostgres ? "postgres" : "sqlite",
       })
     );
+  }
 
-    // Data repair: normalize balance_rub and reserved_rub to standard 2-decimal format
-    try {
-      const users = await pool.query<{ id: string; balance_rub: any; reserved_rub: any }>(
-        'SELECT id, balance_rub, reserved_rub FROM "user"'
-      );
-      for (const u of users.rows) {
-        const b = formatKopecks(parseRub(String(u.balance_rub ?? "0.00")));
-        const r = formatKopecks(parseRub(String(u.reserved_rub ?? "0.00")));
-        if (b !== String(u.balance_rub) || r !== String(u.reserved_rub)) {
-          await pool.query(
-            'UPDATE "user" SET balance_rub=$2, reserved_rub=$3 WHERE id=$1',
-            [u.id, b, r]
-          );
-        }
+  // Data repair: normalize balance_rub and reserved_rub to standard 2-decimal format
+  try {
+    const users = await pool.query<{ id: string; balance_rub: any; reserved_rub: any }>(
+      'SELECT id, balance_rub, reserved_rub FROM "user"'
+    );
+    for (const u of users.rows) {
+      const b = formatKopecks(parseRub(String(u.balance_rub ?? "0.00")));
+      const r = formatKopecks(parseRub(String(u.reserved_rub ?? "0.00")));
+      if (b !== String(u.balance_rub) || r !== String(u.reserved_rub)) {
+        await pool.query(
+          'UPDATE "user" SET balance_rub=$2, reserved_rub=$3 WHERE id=$1',
+          [u.id, b, r]
+        );
       }
-    } catch {
-      // Non-fatal data cleanup
     }
+  } catch {
+    // Non-fatal data cleanup
+  }
+
+  // Auto-release stuck submissions without a provider ID from previous crashes
+  try {
+    const { settleJob } = await import("../generation/settlement");
+    const stuck = await pool.query<{ id: string }>(
+      "SELECT id FROM syntx_jobs WHERE (status='reconciling' OR status='submitting') AND provider_id IS NULL AND settled_at IS NULL"
+    );
+    for (const s of stuck.rows) {
+      try {
+        await settleJob({
+          jobId: s.id,
+          reason: "Запрос не подтверждён провайдером; резерв возвращён",
+          status: "failed",
+        });
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // Non-fatal cleanup
   }
 
   // Ensure administrator is synchronized

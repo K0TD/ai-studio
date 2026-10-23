@@ -115,15 +115,29 @@ export class RouterAIClient {
       );
     }
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new RouterAIError(
-        response.status === 429
+      let details: string | undefined;
+      try {
+        const text = await response.text();
+        try {
+          const json = JSON.parse(text);
+          details = json?.error?.message || json?.error || json?.message || text.slice(0, 300);
+        } catch {
+          details = text.slice(0, 300);
+        }
+      } catch {
+        // failed to read body
+      }
+      const isServerOrTimeout = response.status >= 500 || response.status === 408;
+      const message = details
+        ? `Провайдер отклонил запрос (${response.status}): ${details}`
+        : response.status === 429
           ? "Провайдер временно ограничил запросы"
-          : "Провайдер отклонил запрос генерации",
+          : `Провайдер отклонил запрос генерации (${response.status})`;
+      throw new RouterAIError(
+        message,
         response.status,
-        undefined,
-        init.method === "POST" &&
-          (response.status >= 500 || response.status === 408)
+        details,
+        init.method === "POST" && isServerOrTimeout
       );
     }
     return response;
@@ -141,10 +155,11 @@ export class RouterAIClient {
       if (error instanceof RouterAIError) {
         throw error;
       }
+      const details = error instanceof Error ? error.message : String(error);
       throw new RouterAIError(
-        "Некорректный ответ провайдера",
+        `Некорректный ответ провайдера: ${details}`,
         502,
-        undefined,
+        details,
         init.method === "POST"
       );
     }

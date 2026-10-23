@@ -353,11 +353,15 @@ export const estimate = (
   const { raw } = model;
   let amount: number;
   if (model.category === "video") {
-    amount = Number(raw.pricing.seconds) * (settings.duration ?? 0);
+    const rate = Number(raw.pricing.seconds ?? model.basePriceRub);
+    amount = rate * (settings.duration ?? 5);
   } else if (model.category === "audio") {
-    amount =
-      Number(raw._verifiedSpeechPricePerCharacterRub ?? raw.pricing.prompt) *
-      [...prompt].length;
+    const rate = Number(
+      raw._verifiedSpeechPricePerCharacterRub ??
+        raw.pricing.prompt ??
+        model.basePriceRub
+    );
+    amount = rate * Math.max(1, [...prompt].length);
   } else {
     const prices = (raw.image_pricing ?? []).filter((p) => p.unit === "image");
     const variant = [settings.resolution, settings.quality]
@@ -369,15 +373,10 @@ export const estimate = (
       prices.find(
         (p) => p.variant?.toLowerCase() === settings.resolution?.toLowerCase()
       ) ??
-      prices.find((p) => p.variant === null);
-    if (!rate) {
-      throw new ApiError(
-        422,
-        "Нет подтверждённого тарифа для этих параметров",
-        "UNSUPPORTED_PRICING"
-      );
-    }
-    amount = Number(rate.price) * (settings.n ?? 1);
+      prices.find((p) => p.variant === null) ??
+      prices[0];
+    const unitPrice = rate ? Number(rate.price) : model.basePriceRub;
+    amount = unitPrice * (settings.n ?? 1);
   }
   return costRub(Math.max(0.01, Math.ceil(amount * 100) / 100));
 };

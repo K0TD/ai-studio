@@ -140,101 +140,127 @@ const validateCommon = (
   }
   validateFrames(input, model);
 };
-const aspectFor = (input: GenerationRequest["settings"]) =>
-  input.aspectRatio && !["Auto", "auto"].includes(input.aspectRatio)
-    ? input.aspectRatio
-    : undefined;
+const aspectFor = (
+  input: GenerationRequest["settings"],
+  model?: CatalogModel
+) => {
+  if (!input.aspectRatio || ["Auto", "auto"].includes(input.aspectRatio)) {
+    return undefined;
+  }
+  if (
+    model?.supportedAspectRatios?.length &&
+    !model.supportedAspectRatios.includes(input.aspectRatio)
+  ) {
+    return model.supportedAspectRatios[0];
+  }
+  return input.aspectRatio;
+};
+
 const videoSettings = (
   input: GenerationRequest["settings"],
   model: CatalogModel
 ): GenerationRequest["settings"] => {
-  const duration = input.duration ?? model.supportedDurations?.[0];
-  if (!duration || !model.supportedDurations?.includes(duration)) {
-    fail("длительность");
+  let duration = input.duration ?? model.supportedDurations?.[0] ?? 5;
+  if (
+    model.supportedDurations?.length &&
+    !model.supportedDurations.includes(duration)
+  ) {
+    duration = model.supportedDurations[0];
   }
-  const resolution = input.resolution ?? model.supportedResolutions?.[0];
-  choice(resolution, model.supportedResolutions, "разрешение");
-  if (input.generateAudio && !model.supportsAudio) {
-    fail("аудио");
+  let resolution = input.resolution ?? model.supportedResolutions?.[0];
+  if (
+    model.supportedResolutions?.length &&
+    resolution &&
+    !model.supportedResolutions.includes(resolution)
+  ) {
+    resolution = model.supportedResolutions[0];
   }
   if (model.id.includes("heygen") && !input.inputReferences?.length) {
     fail("изображение аватара обязательно");
   }
-  const output: GenerationRequest["settings"] = {
-    aspectRatio: aspectFor(input),
+  return {
+    aspectRatio: aspectFor(input, model),
     duration,
     frameImages: input.frameImages,
+    generateAudio: model.supportsAudio ? (input.generateAudio ?? false) : false,
     heygenVoiceId: input.heygenVoiceId,
     inputReferences: input.inputReferences,
-    negativePrompt: input.negativePrompt,
+    negativePrompt: model.supportsNegativePrompt ? input.negativePrompt : undefined,
     resolution,
-    seed: input.seed,
+    seed: model.supportsSeed ? input.seed : undefined,
   };
-  if (model.supportsAudio) {
-    output.generateAudio = input.generateAudio ?? false;
-  }
-  return output;
 };
+
 const imageResolution = (
   input: GenerationRequest["settings"],
   model: CatalogModel
 ) => {
   const resolution = input.resolution ?? model.supportedResolutions?.[0];
   if (model.supportedResolutions?.length) {
-    choice(resolution, model.supportedResolutions, "разрешение");
-    return resolution;
+    if (resolution && model.supportedResolutions.includes(resolution)) {
+      return resolution;
+    }
+    return model.supportedResolutions[0];
   }
-  if (resolution && resolution !== "1K") {
-    fail("разрешение");
-  }
+  return resolution === "1K" ? resolution : undefined;
 };
+
 const imageSettings = (
   input: GenerationRequest["settings"],
   model: CatalogModel
 ): GenerationRequest["settings"] => {
   const { raw } = model;
-  const n = input.n ?? 1;
-  if (n > (raw.max_image_count ?? 1)) {
-    fail("число изображений");
+  const maxN = raw.max_image_count ?? 1;
+  const n = Math.max(1, Math.min(input.n ?? 1, maxN));
+  let quality = input.quality;
+  if (
+    quality &&
+    quality !== "auto" &&
+    raw.supported_qualities?.length &&
+    !raw.supported_qualities.includes(quality)
+  ) {
+    quality = "auto";
   }
-  if (input.quality && input.quality !== "auto") {
-    choice(input.quality, raw.supported_qualities, "качество");
+  let background = input.background;
+  if (
+    background &&
+    background !== "auto" &&
+    raw.supported_backgrounds?.length &&
+    !raw.supported_backgrounds.includes(background)
+  ) {
+    background = "auto";
   }
-  if (input.background && input.background !== "auto") {
-    choice(input.background, raw.supported_backgrounds, "фон");
-  }
-  const outputFormat = input.outputFormat ?? "png";
-  if (raw.supported_output_formats?.length) {
-    choice(outputFormat, raw.supported_output_formats, "формат");
-  } else if (outputFormat === "svg") {
-    fail("SVG");
+  let outputFormat = input.outputFormat ?? "png";
+  if (
+    raw.supported_output_formats?.length &&
+    !raw.supported_output_formats.includes(outputFormat)
+  ) {
+    outputFormat = "png";
   }
   return {
-    aspectRatio: aspectFor(input),
-    background: model.supportedBackgrounds?.includes(input.background ?? "")
-      ? input.background
+    aspectRatio: aspectFor(input, model),
+    background: model.supportedBackgrounds?.includes(background ?? "")
+      ? background
       : undefined,
     inputReferences: input.inputReferences,
     n,
-    negativePrompt: input.negativePrompt,
+    negativePrompt: model.supportsNegativePrompt ? input.negativePrompt : undefined,
     outputFormat,
-    quality: model.supportedQualities?.includes(input.quality ?? "")
-      ? input.quality
+    quality: model.supportedQualities?.includes(quality ?? "")
+      ? quality
       : undefined,
     resolution: imageResolution(input, model),
-    seed: input.seed,
+    seed: model.supportsSeed ? input.seed : undefined,
   };
 };
+
 const audioSettings = (
   input: GenerationRequest["settings"],
   model: CatalogModel
 ): GenerationRequest["settings"] => {
-  if (input.mode && input.mode !== "elevenlabs") {
-    fail("режим аудио");
-  }
-  const voiceId = input.voiceId ?? model.supportedVoices?.[0];
-  if (!voiceId || !model.supportedVoices?.includes(voiceId)) {
-    fail("голос");
+  let voiceId = input.voiceId ?? model.supportedVoices?.[0] ?? "eve";
+  if (model.supportedVoices?.length && !model.supportedVoices.includes(voiceId)) {
+    voiceId = model.supportedVoices[0];
   }
   return { mode: "elevenlabs", voiceId };
 };

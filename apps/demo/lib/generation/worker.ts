@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { pool } from "@/lib/db";
+import { toIsoDate } from "@/lib/db/date";
 import { downloadMedia } from "@/lib/media/download";
 import {
   ensureMediaStorage,
@@ -51,9 +52,24 @@ export const workerHeartbeatIsHealthy = async (): Promise<boolean> => {
 };
 
 const claimJob = async (): Promise<Job | null> => {
-  // An expired paid submission is never retried: it may already have been accepted.
+  // Expired submissions without a provider ID were never accepted by the provider; auto-release them
+  const deadSubmissions = await pool.query<{ id: string }>(
+    "SELECT id FROM syntx_jobs WHERE status='submitting' AND provider_id IS NULL AND leased_until<now() AND settled_at IS NULL"
+  );
+  for (const s of deadSubmissions.rows) {
+    try {
+      await settleJob({
+        jobId: s.id,
+        reason: "Таймаут отправки запроса: провайдер не ответил; резерв возвращён",
+        status: "failed",
+      });
+    } catch {
+      // ignore
+    }
+  }
+  // Submissions with a confirmed provider_id are held for reconciliation
   await pool.query(
-    "UPDATE syntx_jobs SET status='reconciling',error='Не удалось подтвердить отправку провайдеру. Резерв сохранён до сверки.',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE status='submitting' AND leased_until<now() AND settled_at IS NULL"
+    "UPDATE syntx_jobs SET status='reconciling',error='Не удалось подтвердить результат у провайдера. Резерв сохранён до сверки.',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE status='submitting' AND provider_id IS NOT NULL AND leased_until<now() AND settled_at IS NULL"
   );
   const token = randomUUID();
   const result = await pool.query<JobRow>(
@@ -240,17 +256,19 @@ const persistArtifact = async (
   bytes: Buffer,
   mime: string
 ) => {
-  if (
-    job.tab === "image" &&
-    mime !== "image/svg+xml" &&
-    imageMime(bytes) !== mime
-  ) {
-    throw new Error("Invalid provider image content");
+  let finalMime = mime;
+  if (job.tab === "image" && mime !== "image/svg+xml") {
+    const detected = imageMime(bytes);
+    if (detected) {
+      finalMime = detected;
+    } else if (mime !== "application/octet-stream") {
+      throw new Error("Invalid provider image content");
+    }
   }
   const key = await saveMedia(bytes, job.id, String(ordinal));
   await pool.query(
     "INSERT INTO syntx_artifacts (id,job_id,user_id,ordinal,storage_key,mime_type,size_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(job_id,ordinal) DO UPDATE SET storage_key=excluded.storage_key,mime_type=excluded.mime_type,size_bytes=excluded.size_bytes",
-    [randomUUID(), job.id, job.user_id, ordinal, key, mime, bytes.length]
+    [randomUUID(), job.id, job.user_id, ordinal, key, finalMime, bytes.length]
   );
 };
 const persistResult = async (job: Job) => {
@@ -323,6 +341,20 @@ const runMaintenance = async () => {
     await pool.query(
       "DELETE FROM syntx_worker_heartbeats WHERE updated_at<now()-interval '1 day'"
     );
+    const stuck = await pool.query<{ id: string }>(
+      "SELECT id FROM syntx_jobs WHERE (status='reconciling' OR status='submitting') AND provider_id IS NULL AND settled_at IS NULL AND created_at < now() - interval '5 minutes'"
+    );
+    for (const s of stuck.rows) {
+      try {
+        await settleJob({
+          jobId: s.id,
+          reason: "Запрос не подтверждён провайдером; резерв возвращён",
+          status: "failed",
+        });
+      } catch {
+        // ignore
+      }
+    }
   } catch {
     console.error(JSON.stringify({ event: "worker.maintenance_failed" }));
   }
@@ -341,19 +373,21 @@ const refreshCatalogIfNeeded = async () => {
 };
 
 const handleJobError = async (job: Job, error: Error) => {
+  const isRouterAI =
+    error instanceof RouterAIError || (error as any)?.name === "RouterAIError";
+  const isApi =
+    error instanceof ApiError || (error as any)?.name === "ApiError";
+  const isUncertain = isRouterAI && Boolean((error as any).uncertain);
+
   if (
     job.status === "queued" ||
-    (error instanceof RouterAIError &&
-      !error.uncertain &&
-      job.status === "submitting")
+    ((isRouterAI || isApi) && !isUncertain && job.status === "submitting") ||
+    (isRouterAI && (error as any).status === 404 && job.status === "running")
   ) {
     await settleJob({
       jobId: job.id,
       leaseToken: job.lease_token ?? undefined,
-      reason:
-        error instanceof ApiError || error instanceof RouterAIError
-          ? error.message
-          : "Не удалось подготовить запрос генерации",
+      reason: error.message || "Не удалось подготовить запрос генерации",
       status: "failed",
     });
   } else if (job.status === "submitting") {
@@ -362,7 +396,7 @@ const handleJobError = async (job: Job, error: Error) => {
     // GET/download/storage retries are safe. A reservation never expires with a browser timeout.
     const exhausted =
       job.attempts > 500 ||
-      Date.now() - new Date(job.created_at).getTime() > 7 * 24 * 60 * 60_000;
+      Date.now() - new Date(toIsoDate(job.created_at)).getTime() > 7 * 24 * 60 * 60_000;
     await (exhausted ? markReconciling(job) : retryLater(job));
   } else {
     throw error;

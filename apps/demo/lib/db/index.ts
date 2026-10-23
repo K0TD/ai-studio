@@ -150,7 +150,7 @@ const translatePgToSqlite = (sqlText: string, params: any[] = []) => {
   );
   sql = sql.replace(
     /date_trunc\('day',\s*now\(\)\s*at\s*time\s*zone\s*'Europe\/Moscow'\)\s*at\s*time\s*zone\s*'Europe\/Moscow'/gi,
-    "date('now', '+3 hours')"
+    "(case when typeof(created_at)='integer' then (unixepoch(date('now', '+3 hours')) - 10800) else date('now', '+3 hours') end)"
   );
   sql = sql.replace(/date_trunc\([^)]+\)/gi, "date('now')");
   sql = sql.replace(/now\(\)/gi, "datetime('now')");
@@ -223,15 +223,21 @@ export const pool = {
 
     // Transaction controls
     if (/^BEGIN\b/i.test(trimmed)) {
-      db.run("BEGIN IMMEDIATE");
+      if (!db.inTransaction) {
+        db.run("BEGIN IMMEDIATE");
+      }
       return { rowCount: 0, rows: [] };
     }
     if (/^COMMIT\b/i.test(trimmed)) {
-      db.run("COMMIT");
+      if (db.inTransaction) {
+        db.run("COMMIT");
+      }
       return { rowCount: 0, rows: [] };
     }
     if (/^ROLLBACK\b/i.test(trimmed)) {
-      db.run("ROLLBACK");
+      if (db.inTransaction) {
+        db.run("ROLLBACK");
+      }
       return { rowCount: 0, rows: [] };
     }
 
@@ -268,6 +274,32 @@ export const pool = {
                 normalized[jKey] = JSON.parse(normalized[jKey]);
               } catch {
                 // keep string if not json
+              }
+            }
+          }
+          for (const mKey of [
+            "balance_rub",
+            "reserved_rub",
+            "amount_rub",
+            "balance_before_rub",
+            "balance_after_rub",
+            "estimated_cost_rub",
+            "max_cost_rub",
+            "charged_cost_rub",
+            "provider_cost_rub",
+            "variance_rub",
+          ]) {
+            if (
+              mKey in normalized &&
+              normalized[mKey] !== null &&
+              normalized[mKey] !== undefined
+            ) {
+              const val = String(normalized[mKey]);
+              const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
+              if (match) {
+                const whole = match[2];
+                const dec = (match[3] ?? "").padEnd(2, "0");
+                normalized[mKey] = `${match[1] ?? ""}${whole}.${dec}`;
               }
             }
           }

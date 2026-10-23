@@ -35,9 +35,15 @@ export const validateRuntimeEnv = () => {
     throw new Error(`Не заданы обязательные настройки: ${fields.join(", ")}`);
   }
   const settings = parsed.data;
+  const authHost = new URL(settings.BETTER_AUTH_URL).hostname;
+  const isLocalHost =
+    authHost === "localhost" ||
+    authHost === "127.0.0.1" ||
+    authHost.endsWith(".localhost");
   if (
     process.env.NODE_ENV === "production" &&
-    new URL(settings.BETTER_AUTH_URL).protocol !== "https:"
+    new URL(settings.BETTER_AUTH_URL).protocol !== "https:" &&
+    !isLocalHost
   ) {
     throw new Error("BETTER_AUTH_URL должен использовать HTTPS в production");
   }

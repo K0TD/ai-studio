@@ -45,8 +45,9 @@ const settlementAmounts = (
   const charged = nominal > held ? held : nominal;
   const after = parseRub(owner.balance_rub) - charged;
   if (
-    parseRub(owner.reserved_rub) < held ||
-    after < parseRub(owner.reserved_rub) - held
+    !failedFree &&
+    (parseRub(owner.reserved_rub) < held ||
+      after < parseRub(owner.reserved_rub) - held)
   ) {
     throw new Error("Wallet reservation invariant violated");
   }

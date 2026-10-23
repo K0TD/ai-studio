@@ -6,9 +6,11 @@ import type { AdminUser } from "./types";
 export const userView = (account: typeof user.$inferSelect): AdminUser => {
   const balanceKopecks = parseRub(String(account.balanceRub ?? "0.00"));
   const reservedKopecks = parseRub(String(account.reservedRub ?? "0.00"));
+  const availableKopecks =
+    balanceKopecks >= reservedKopecks ? balanceKopecks - reservedKopecks : 0n;
   return {
     activatedAt: account.activatedAt ? toIsoDate(account.activatedAt) : null,
-    availableRub: formatKopecks(balanceKopecks - reservedKopecks),
+    availableRub: formatKopecks(availableKopecks),
     balanceRub: formatKopecks(balanceKopecks),
     createdAt: toIsoDate(account.createdAt),
     email: account.email,

@@ -54,7 +54,9 @@ export const downloadMedia = async (
   ) {
     throw new Error("Unsupported media URL");
   }
-  const permitted = (process.env.ROUTERAI_MEDIA_HOSTS ?? "routerai.ru")
+  const defaultHosts =
+    "routerai.ru,yandexcloud.net,timeweb.cloud,amazonaws.com,cloudflarestorage.com,windows.net,blob.core.windows.net,fal.media,replicate.delivery,googleusercontent.com,storage.googleapis.com,openai.com,b-cdn.net";
+  const permitted = (process.env.ROUTERAI_MEDIA_HOSTS ?? defaultHosts)
     .split(",")
     .map((h) => h.trim())
     .filter(Boolean);
@@ -63,7 +65,7 @@ export const downloadMedia = async (
       (host) => url.hostname === host || url.hostname.endsWith(`.${host}`)
     )
   ) {
-    throw new Error("Provider media host is not allowed");
+    throw new Error(`Provider media host is not allowed: ${url.hostname}`);
   }
   const records = await lookup(url.hostname, { all: true, family: 4 });
   if (
@@ -91,16 +93,20 @@ export const downloadMedia = async (
   const response = await responsePending.promise;
   if (response.statusCode !== 200) {
     response.destroy();
-    throw new Error("Provider media download rejected");
+    throw new Error(`Provider media download rejected: status ${response.statusCode}`);
   }
-  const [mime] = (response.headers["content-type"] ?? "").split(";");
+  let [mime] = (response.headers["content-type"] ?? "").split(";");
+  mime = mime.trim().toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+  if (mime === "audio/mp3") mime = "audio/mpeg";
+  if (mime === "audio/x-wav") mime = "audio/wav";
   if (
-    !/^(image\/(png|jpeg|webp|svg\+xml)|audio\/(mpeg|wav)|video\/mp4)$/u.test(
+    !/^(image\/(png|jpeg|webp|svg\+xml)|audio\/(mpeg|wav)|video\/mp4|application\/octet-stream)$/u.test(
       mime
     )
   ) {
     response.destroy();
-    throw new Error("Unsupported provider content type");
+    throw new Error(`Unsupported provider content type: ${mime}`);
   }
   const chunks: Buffer[] = [];
   let size = 0;
