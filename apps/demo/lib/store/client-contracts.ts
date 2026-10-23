@@ -53,9 +53,23 @@ export const clientCatalogSchema = z.object({
   image: z.array(clientModelSchema).max(1000),
   video: z.array(clientModelSchema).max(1000),
 });
+
+export const safeRubSchema = z.preprocess((val) => {
+  if (typeof val === "number") return val.toFixed(2);
+  if (typeof val === "string") {
+    const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
+    if (match) {
+      const whole = match[2];
+      const dec = (match[3] ?? "").padEnd(2, "0");
+      return `${match[1] ?? ""}${whole}.${dec}`;
+    }
+  }
+  return val;
+}, rubSchema);
+
 export const studioUserSchema = z.object({
-  availableRub: rubSchema,
-  balanceRub: rubSchema,
+  availableRub: safeRubSchema,
+  balanceRub: safeRubSchema,
   email: z.string().max(254),
   id: identifier,
   isApproved: z.boolean(),
@@ -63,7 +77,7 @@ export const studioUserSchema = z.object({
   isEnvAdmin: z.boolean().optional(),
   name: z.string().max(500),
   permissions: permissionsSchema,
-  reservedRub: rubSchema,
+  reservedRub: safeRubSchema,
   role: roleSchema,
 });
 export const accountResponseSchema = z.object({ user: studioUserSchema });
@@ -79,13 +93,13 @@ export const chatsResponseSchema = z.object({
   chats: z.array(chatSchema).max(500),
 });
 export const generationItemSchema = z.object({
-  chargedCostRub: rubSchema.nullable().optional(),
+  chargedCostRub: safeRubSchema.nullable().optional(),
   chatId: z.uuid(),
   costRub: z.number().finite().nonnegative(),
   createdAt: z.iso.datetime({ offset: true }),
-  estimatedCostRub: rubSchema.optional(),
+  estimatedCostRub: safeRubSchema.optional(),
   id: z.uuid(),
-  maxCostRub: rubSchema.optional(),
+  maxCostRub: safeRubSchema.optional(),
   metadata: z
     .object({
       aspectRatio: z.string().max(160).optional(),

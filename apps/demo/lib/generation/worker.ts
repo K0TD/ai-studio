@@ -416,6 +416,7 @@ export const workerTick = async (): Promise<number> => {
     );
     console.error(
       JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
         event: "generation.worker_retry",
         jobId: job.id,
         state: job.status,

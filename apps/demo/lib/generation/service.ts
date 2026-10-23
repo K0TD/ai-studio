@@ -312,9 +312,12 @@ export const submitGeneration = async (
           quote.max_cost_rub,
         ]
       );
+      const nextReserved = formatKopecks(
+        parseRub(String(owner.reserved_rub ?? "0.00")) + reserve
+      );
       await client.query(
-        'UPDATE "user" SET reserved_rub=reserved_rub+$2::numeric,updated_at=now() WHERE id=$1',
-        [account.id, quote.max_cost_rub]
+        'UPDATE "user" SET reserved_rub=$2,updated_at=now() WHERE id=$1',
+        [account.id, nextReserved]
       );
       await client.query(
         "INSERT INTO transactions (id,user_id,job_id,amount_rub,type,reason,balance_before_rub,balance_after_rub,idempotency_key) VALUES ($1,$2,$3,0,'generation_reserve',$4,$5,$5,$6)",

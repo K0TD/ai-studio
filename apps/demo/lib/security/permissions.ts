@@ -1,8 +1,27 @@
 import { z } from "zod";
 export const roleSchema = z.enum(["user", "vip", "admin"]);
 export const sectionSchema = z.enum(["video", "image", "audio"]);
-export const rubSchema = z.string().regex(/^(0|[1-9]\d{0,9})\.\d{2}$/u);
-export const signedRubSchema = z.string().regex(/^-?(0|[1-9]\d{0,9})\.\d{2}$/u);
+const normalizeRubString = (val: unknown) => {
+  if (typeof val === "number") return val.toFixed(2);
+  if (typeof val === "string") {
+    const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
+    if (match) {
+      const whole = match[2];
+      const dec = (match[3] ?? "").padEnd(2, "0");
+      return `${match[1] ?? ""}${whole}.${dec}`;
+    }
+  }
+  return val;
+};
+
+export const rubSchema = z.preprocess(
+  normalizeRubString,
+  z.string().regex(/^(0|[1-9]\d{0,9})\.\d{2}$/u)
+);
+export const signedRubSchema = z.preprocess(
+  normalizeRubString,
+  z.string().regex(/^-?(0|[1-9]\d{0,9})\.\d{2}$/u)
+);
 export const permissionsSchema = z.strictObject({
   dailyLimitRub: rubSchema.nullable(),
   maxConcurrentJobs: z.number().int().min(1).max(20),

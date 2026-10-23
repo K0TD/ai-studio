@@ -159,9 +159,14 @@ export const settleJob = async (input: Settlement): Promise<void> => {
       variance,
       varianceValue,
     } = settlementAmounts(input, job, owner);
+    const held = parseRub(job.max_cost_rub);
+    const currentReserved = parseRub(String(owner.reserved_rub ?? "0.00"));
+    const nextReserved = formatKopecks(
+      currentReserved >= held ? currentReserved - held : 0n
+    );
     await client.query(
-      'UPDATE "user" SET balance_rub=$2,reserved_rub=reserved_rub-$3::numeric,updated_at=now() WHERE id=$1',
-      [owner.id, formatKopecks(after), job.max_cost_rub]
+      'UPDATE "user" SET balance_rub=$2,reserved_rub=$3,updated_at=now() WHERE id=$1',
+      [owner.id, formatKopecks(after), nextReserved]
     );
     await client.query(
       "INSERT INTO transactions (id,user_id,actor_id,job_id,amount_rub,type,reason,balance_before_rub,balance_after_rub,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",

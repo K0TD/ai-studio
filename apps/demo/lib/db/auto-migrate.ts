@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { formatKopecks, parseRub } from "../billing/money";
 import { synchronizeAdmin } from "../admin/bootstrap";
 import { DEFAULT_ADMIN_PERMISSIONS } from "../security/permissions";
 import { isPostgres, pool } from "./index";
@@ -469,6 +470,25 @@ export const ensureDatabase = async (): Promise<void> => {
         provider: isPostgres ? "postgres" : "sqlite",
       })
     );
+
+    // Data repair: normalize balance_rub and reserved_rub to standard 2-decimal format
+    try {
+      const users = await pool.query<{ id: string; balance_rub: any; reserved_rub: any }>(
+        'SELECT id, balance_rub, reserved_rub FROM "user"'
+      );
+      for (const u of users.rows) {
+        const b = formatKopecks(parseRub(String(u.balance_rub ?? "0.00")));
+        const r = formatKopecks(parseRub(String(u.reserved_rub ?? "0.00")));
+        if (b !== String(u.balance_rub) || r !== String(u.reserved_rub)) {
+          await pool.query(
+            'UPDATE "user" SET balance_rub=$2, reserved_rub=$3 WHERE id=$1',
+            [u.id, b, r]
+          );
+        }
+      }
+    } catch {
+      // Non-fatal data cleanup
+    }
   }
 
   // Ensure administrator is synchronized
