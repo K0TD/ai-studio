@@ -97,10 +97,34 @@ const translatePgToSqlite = (sqlText: string, params: any[] = []) => {
     /(=|\bin\b)\s*ANY\s*\(\s*\$([0-9]+)(?:::text\[\])?\s*\)/gi,
     (_match, _op, paramIdxStr) => {
       const idx = Number(paramIdxStr) - 1;
-      if (Array.isArray(boundParams[idx])) {
+      if (boundParams[idx] === undefined || boundParams[idx] === null) {
+        boundParams[idx] = "[]";
+      } else if (Array.isArray(boundParams[idx])) {
         boundParams[idx] = JSON.stringify(boundParams[idx]);
+      } else if (
+        typeof boundParams[idx] === "string" &&
+        !boundParams[idx].startsWith("[")
+      ) {
+        boundParams[idx] = JSON.stringify([boundParams[idx]]);
       }
-      return `IN (SELECT value FROM json_each(?${paramIdxStr}))`;
+      return ` IN (SELECT value FROM json_each(?${paramIdxStr}))`;
+    }
+  );
+  sql = sql.replace(
+    /\bIN\s*\(\s*\$([0-9]+)(?:::text\[\])?\s*\)/gi,
+    (_match, paramIdxStr) => {
+      const idx = Number(paramIdxStr) - 1;
+      if (boundParams[idx] === undefined || boundParams[idx] === null) {
+        boundParams[idx] = "[]";
+      } else if (Array.isArray(boundParams[idx])) {
+        boundParams[idx] = JSON.stringify(boundParams[idx]);
+      } else if (
+        typeof boundParams[idx] === "string" &&
+        !boundParams[idx].startsWith("[")
+      ) {
+        boundParams[idx] = JSON.stringify([boundParams[idx]]);
+      }
+      return ` IN (SELECT value FROM json_each(?${paramIdxStr}))`;
     }
   );
 

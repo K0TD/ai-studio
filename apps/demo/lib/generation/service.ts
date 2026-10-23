@@ -347,11 +347,14 @@ export const listJobs = async (
     [userId, options.chatId ?? null, options.cursor ?? null]
   );
   const visible = rows.slice(0, 50);
-  const queryResult11 = await pool.query(
-    "SELECT id,job_id FROM syntx_artifacts WHERE user_id=$1 AND job_id=ANY($2::text[]) ORDER BY ordinal",
-    [userId, visible.map((r) => r.id)]
-  );
-  const artifacts = visible.length ? queryResult11.rows : [];
+  const artifacts = visible.length
+    ? (
+        await pool.query(
+          "SELECT id,job_id FROM syntx_artifacts WHERE user_id=$1 AND job_id=ANY($2::text[]) ORDER BY ordinal",
+          [userId, visible.map((r) => r.id)]
+        )
+      ).rows
+    : [];
   return {
     items: visible.map((r) =>
       jobItem(

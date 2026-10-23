@@ -1,5 +1,6 @@
 import { costRub } from "@/lib/billing/money";
 import { pool } from "@/lib/db";
+import { toIsoDate } from "@/lib/db/date";
 import { routerai, limitedBody } from "@/lib/routerai/client";
 import {
   VIDEO_MODELS,
@@ -262,7 +263,7 @@ export const catalogModels = async (
   const stale =
     !rows.length ||
     rows.some(
-      (r) => Date.now() - new Date(r.verified_at).getTime() > MAX_AGE_MS
+      (r) => Date.now() - new Date(toIsoDate(r.verified_at)).getTime() > MAX_AGE_MS
     );
   if (stale && refresh) {
     try {
@@ -280,9 +281,9 @@ export const catalogModels = async (
     const model = normalizeCatalogModel(
       base,
       row && !row.data.unavailable ? row.data : undefined,
-      row ? new Date(row.verified_at).toISOString() : null
+      row ? toIsoDate(row.verified_at) : null
     );
-    if (!row || Date.now() - new Date(row.verified_at).getTime() > MAX_AGE_MS) {
+    if (!row || Date.now() - new Date(toIsoDate(row.verified_at)).getTime() > MAX_AGE_MS) {
       model.enabled = false;
       model.disabledReason = "catalog_stale";
     }

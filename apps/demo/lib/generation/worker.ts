@@ -107,13 +107,14 @@ const retryLater = async (job: Job) => {
 const prepareReferences = async (job: Job) => {
   const { request } = job;
   const ids = referencedFileIds(request.settings);
-  const queryResult1 = await pool.query<
-    Pick<FileRow, "id" | "storage_key" | "mime_type">
-  >(
-    "SELECT id,storage_key,mime_type FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
-    [job.user_id, ids]
-  );
-  const rows = ids.length ? queryResult1.rows : [];
+  const rows = ids.length
+    ? (
+        await pool.query<Pick<FileRow, "id" | "storage_key" | "mime_type">>(
+          "SELECT id,storage_key,mime_type FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
+          [job.user_id, ids]
+        )
+      ).rows
+    : [];
   const dataById = new Map<string, string>();
   for (const row of rows) {
     const queryResult2 = await readMedia(row.storage_key);

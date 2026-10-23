@@ -1,5 +1,3 @@
-import { toNextJsHandler } from "better-auth/next-js";
-
 import { auth } from "@/lib/auth";
 import {
   authRequestPath,
@@ -13,7 +11,6 @@ import {
   requireUser,
 } from "@/lib/security/http";
 
-const handlers = toNextJsHandler(auth.handler);
 export const GET = apiRoute(async (request) => {
   if (!["/get-session", "/list-sessions"].includes(authRequestPath(request))) {
     throw new ApiError(404, "Метод недоступен");

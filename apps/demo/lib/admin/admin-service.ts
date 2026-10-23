@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db, pool } from "../db";
 import { adminAudit, session, transactions, user } from "../db/active-schema";
+import { toIsoDate } from "../db/date";
 import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import {
@@ -87,7 +88,11 @@ export const AdminService = {
       const duplicate = z
         .object({ cause: z.object({ code: z.literal("23505") }) })
         .safeParse(error);
-      if (duplicate.success) {
+      const isSqliteDuplicate =
+        error instanceof Error &&
+        (error.message.includes("UNIQUE constraint failed") ||
+          (error as any).code === "SQLITE_CONSTRAINT_UNIQUE");
+      if (duplicate.success || isSqliteDuplicate) {
         throw new ApiError(409, "Учетная запись уже существует");
       }
       throw error;
@@ -102,7 +107,10 @@ export const AdminService = {
       .offset((query.page - 1) * query.limit);
     const [aggregate] = await db.select({ total: count() }).from(adminAudit);
     return {
-      events,
+      events: events.map((e: any) => ({
+        ...e,
+        createdAt: toIsoDate(e.createdAt),
+      })),
       limit: query.limit,
       page: query.page,
       total: aggregate.total,
@@ -145,6 +153,7 @@ export const AdminService = {
       total: aggregate.total,
       transactions: rows.map((row: any) => ({
         ...row.transaction,
+        createdAt: toIsoDate(row.transaction.createdAt),
         userName: row.userName,
       })),
     };
