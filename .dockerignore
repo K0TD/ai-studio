@@ -19,3 +19,8 @@ backups
 restore
 coverage
 syntx.pdf
+storage
+**/*.sqlite
+**/*.sqlite-*
+**/*.db
+**/*.db-*

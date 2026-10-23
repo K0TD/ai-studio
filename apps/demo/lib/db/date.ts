@@ -1,31 +1,33 @@
-export const toIsoDate = (value: unknown): string => {
-  if (!value) {
-    return new Date().toISOString();
-  }
-  if (value instanceof Date) {
-    return isNaN(value.getTime()) ? new Date().toISOString() : value.toISOString();
-  }
-  if (typeof value === "number") {
-    // If timestamp is in seconds (unix epoch in seconds is ~1.7e9 < 1e11), convert to ms
-    const ms = value < 100_000_000_000 ? value * 1000 : value;
-    const d = new Date(ms);
-    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-  }
-  if (typeof value === "string") {
-    // Pure numeric string
-    if (/^\d+$/.test(value)) {
-      const num = Number(value);
-      const ms = num < 100_000_000_000 ? num * 1000 : num;
-      const d = new Date(ms);
-      return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-    }
-    // SQLite format "YYYY-MM-DD HH:MM:SS" -> convert to ISO UTC
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value)) {
-      const d = new Date(value.replace(" ", "T") + "Z");
-      return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-    }
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-  }
-  return new Date().toISOString();
-};
+import { z } from "zod";
+
+const epochMilliseconds = (epoch: number) =>
+  Math.abs(epoch) < 100_000_000_000 ? epoch * 1000 : epoch;
+const storedDate = z
+  .union([
+    z.date(),
+    z
+      .number()
+      .finite()
+      .transform((epoch) => new Date(epochMilliseconds(epoch))),
+    z
+      .string()
+      .min(1)
+      .transform((text) => {
+        if (/^-?\d+$/u.test(text)) {
+          return new Date(epochMilliseconds(Number(text)));
+        }
+        // SQLite's legacy datetime has no zone; it was always written as UTC.
+        const utc = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/u.test(
+          text
+        )
+          ? `${text.replace(" ", "T")}Z`
+          : text;
+        return new Date(utc);
+      }),
+  ])
+  .pipe(z.date());
+
+// Invalid persisted dates must not renew quotes, leases or catalog freshness.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This is the persisted-date parsing boundary across PostgreSQL and SQLite.
+export const toIsoDate = (value: unknown): string =>
+  storedDate.parse(value).toISOString();

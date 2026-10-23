@@ -21,7 +21,11 @@ export const requireUser = async (request: Request): Promise<AuthUser> => {
     .select()
     .from(user)
     .where(eq(user.id, session.user.id));
-  if (!account || account.isBanned || (!account.activatedAt && !account.isEnvAdmin)) {
+  if (
+    !account ||
+    account.isBanned ||
+    (!account.activatedAt && !account.isEnvAdmin)
+  ) {
     throw new ApiError(403, "Доступ к аккаунту закрыт", "ACCOUNT_DISABLED");
   }
   return account;
@@ -77,7 +81,7 @@ export const apiRoute =
       return Response.json(
         {
           code: knownError ? error.code : "INTERNAL_ERROR",
-          error: knownError ? error.message : errorMessage,
+          error: knownError ? error.message : "Внутренняя ошибка сервера",
           requestId,
         },
         {

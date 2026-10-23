@@ -360,7 +360,8 @@ const QuoteSummary = ({
 }) => {
   let message = "Стоимость появится после ввода промпта";
   if (!allowed) {
-    message = "👑 Для этой модели требуется статус VIP. Переключитесь на бюджетную модель или обратитесь к администратору.";
+    message =
+      "👑 Для этой модели требуется статус VIP. Переключитесь на бюджетную модель или обратитесь к администратору.";
   } else if (error) {
     message = error;
   } else if (quote && Number(available) < Number(quote.maxCostRub)) {
@@ -487,10 +488,7 @@ export const SyntxPromptBar = ({
   const model = state.models.find(
     (candidate) => candidate.id === request?.modelId
   );
-  const isVipOrAdmin =
-    state.user?.role === "vip" || state.user?.role === "admin";
-  const allowed =
-    !!request && (isVipOrAdmin || modelAllowed(state.user, model));
+  const allowed = !!request && modelAllowed(state.user, model);
   useChatInitialization(request, allowed);
   const { quote, error, quoting } = useQuote(
     request,

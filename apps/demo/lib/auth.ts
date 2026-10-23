@@ -16,29 +16,16 @@ const getBaseURL = () => {
   return process.env.BETTER_AUTH_URL_DEV?.trim() || "http://localhost:3000";
 };
 
-const getTrustedOrigins = () => {
-  const list = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://10.255.255.254:3000",
-  ];
-  if (process.env.BETTER_AUTH_URL?.trim()) {
-    try {
-      list.push(new URL(process.env.BETTER_AUTH_URL.trim()).origin);
-    } catch {
-      list.push(process.env.BETTER_AUTH_URL.trim());
-    }
-  }
-  return Array.from(new Set(list));
-};
+const getTrustedOrigins = () => [new URL(getBaseURL()).origin];
 
-const createAuth = () => {
-  return betterAuth({
+const createAuth = () =>
+  betterAuth({
     advanced: { ipAddress: { ipAddressHeaders: ["x-forwarded-for"] } },
     baseURL: getBaseURL(),
-    database: isPostgres
-      ? drizzleAdapter(db, { provider: "pg", schema: pgSchema })
-      : drizzleAdapter(db as any, { provider: "sqlite", schema: sqliteSchema }),
+    database: drizzleAdapter(db, {
+      provider: isPostgres ? "pg" : "sqlite",
+      schema: isPostgres ? pgSchema : sqliteSchema,
+    }),
     databaseHooks: {
       session: {
         create: {
@@ -85,22 +72,22 @@ const createAuth = () => {
       },
     },
   });
-};
 
 let authInstance: ReturnType<typeof createAuth> | undefined;
 export const getAuth = () => (authInstance ??= createAuth());
 
 // Build-time route discovery must not initialize authentication without runtime secrets.
 export const auth = new Proxy(
-  (() => {}) as unknown as ReturnType<typeof createAuth>,
+  // SAFETY: Every property is forwarded to the initialized Better Auth instance.
+  {} as ReturnType<typeof createAuth>,
   {
-    apply(_target, _thisArg, args) {
+    get(_target, property) {
       const instance = getAuth();
-      return (instance.handler as any)(...args);
-    },
-    get(_target, prop) {
-      const instance = getAuth();
-      const value = (instance as any)[prop];
+      // Better Auth exposes dynamically named API properties through this lazy proxy.
+      // oxlint-disable-next-line anti-slop/no-reflect-get
+      const value = Reflect.get(instance, property);
+      // Preserve the receiver for Better Auth's public methods.
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof
       return typeof value === "function" ? value.bind(instance) : value;
     },
   }

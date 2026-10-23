@@ -1,24 +1,16 @@
 export const register = async () => {
-  if (process.env.NEXT_RUNTIME === "nodejs") {
-    if (process.env.NEXT_PHASE === "phase-production-build") {
-      return;
-    }
-    try {
-      const { validateRuntimeEnv } = await import("./lib/env");
-      const settings = validateRuntimeEnv();
-      const { synchronizeAdmin } = await import("./lib/admin/bootstrap");
-      await synchronizeAdmin({
-        email: process.env.ADMIN_EMAIL?.trim() || "admin@studio.internal",
-        login: settings.ADMIN_LOGIN,
-        password: settings.ADMIN_PASSWORD,
-      });
-    } catch (error) {
-      if (process.env.NEXT_PHASE !== "phase-production-build") {
-        console.warn(
-          "Не удалось синхронизировать администратора при старте:",
-          error instanceof Error ? error.message : error
-        );
-      }
-    }
+  if (
+    process.env.NEXT_RUNTIME !== "nodejs" ||
+    process.env.NEXT_PHASE === "phase-production-build"
+  ) {
+    return;
   }
+  const { initLogging } = await import("./lib/logging");
+  initLogging("web");
+  if (process.env.NODE_ENV === "production") {
+    const { validateRuntimeEnv } = await import("./lib/env");
+    validateRuntimeEnv();
+  }
+  const { ensureDatabase } = await import("./lib/db/auto-migrate");
+  await ensureDatabase();
 };

@@ -4,8 +4,7 @@ import { z } from "zod";
 
 import { formatKopecks, parseRub } from "../billing/money";
 import { db, isPostgres } from "../db";
-import * as pgSchema from "../db/schema";
-import * as sqliteSchema from "../db/sqlite-schema";
+import * as s from "../db/active-schema";
 import { DEFAULT_ADMIN_PERMISSIONS } from "../security/permissions";
 
 const adminCredentialsSchema = z.strictObject({
@@ -28,27 +27,23 @@ export const synchronizeAdmin = async (
     throw new Error("Проверьте ADMIN_LOGIN, ADMIN_PASSWORD и ADMIN_EMAIL");
   }
   const settings = validated.data;
-  const s = isPostgres ? pgSchema : sqliteSchema;
 
-  return db.transaction(async (tx: any) => {
+  return await db.transaction(async (tx) => {
     if (isPostgres) {
       await tx.execute(sql`select pg_advisory_xact_lock(71442103)`);
     }
 
-    const query = tx
-      .select()
-      .from(s.user)
-      .where(eq(s.user.isEnvAdmin, true as any));
+    const query = tx.select().from(s.user).where(eq(s.user.isEnvAdmin, true));
 
-    const [existing] = isPostgres
-      ? await query.for("update")
-      : await query;
+    const [existing] = isPostgres ? await query.for("update") : await query;
 
     const id = existing?.id ?? crypto.randomUUID();
     const [credential] = await tx
       .select()
       .from(s.account)
-      .where(and(eq(s.account.userId, id), eq(s.account.providerId, "credential")));
+      .where(
+        and(eq(s.account.userId, id), eq(s.account.providerId, "credential"))
+      );
 
     const passwordMatches = credential?.password
       ? await verifyPassword({
@@ -57,18 +52,15 @@ export const synchronizeAdmin = async (
         })
       : false;
 
-    const needsBalance =
-      !existing || !existing.balanceRub || existing.balanceRub === "0.00";
-    const initialBalance = needsBalance
-      ? "10000.00"
-      : formatKopecks(parseRub(String(existing.balanceRub)));
+    const initialBalance = existing
+      ? formatKopecks(parseRub(String(existing.balanceRub)))
+      : "10000.00";
 
     const changed =
       !existing ||
       !passwordMatches ||
       existing.username !== settings.login ||
-      existing.email !== settings.email ||
-      needsBalance;
+      existing.email !== settings.email;
 
     if (!changed) {
       return { changed: false };
@@ -108,6 +100,20 @@ export const synchronizeAdmin = async (
         },
         target: s.user.id,
       });
+
+    if (!existing) {
+      await tx.insert(s.transactions).values({
+        actorId: id,
+        amountRub: initialBalance,
+        balanceAfterRub: initialBalance,
+        balanceBeforeRub: "0.00",
+        id: crypto.randomUUID(),
+        idempotencyKey: `initial:${id}`,
+        reason: "Начальный баланс администратора",
+        type: "topup",
+        userId: id,
+      });
+    }
 
     if (!passwordMatches) {
       const passwordHash = await hashPassword(settings.password);

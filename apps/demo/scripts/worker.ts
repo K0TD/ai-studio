@@ -1,7 +1,10 @@
-import { waitForDatabase } from "../lib/db/auto-migrate";
 import { pool } from "../lib/db";
+import { waitForDatabase } from "../lib/db/auto-migrate";
 import { validateRuntimeEnv } from "../lib/env";
 import { runWorker } from "../lib/generation/worker";
+import { initLogging } from "../lib/logging";
+
+initLogging("worker");
 
 const shutdown = new AbortController();
 process.once("SIGTERM", () => shutdown.abort());

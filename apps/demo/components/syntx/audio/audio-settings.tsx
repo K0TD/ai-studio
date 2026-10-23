@@ -1,43 +1,53 @@
 "use client";
-import {
-  AUDIO_FAMILIES,
-  AUDIO_MODELS,
-  isBudgetModel,
-} from "@/lib/routerai/models-catalog";
-import { modelAllowed } from "@/lib/store/client-policy";
+import { AUDIO_FAMILIES, isBudgetModel } from "@/lib/routerai/models-catalog";
+import { disabledModelReason, modelAllowed } from "@/lib/store/client-policy";
 import { useSyntxStore } from "@/lib/store/syntx-store";
+
+import { ModelAvailability } from "../shell/model-availability";
 
 const input =
   "w-full rounded-lg border border-border bg-background p-2 text-xs";
 
 export const AudioSettingsPanel = () => {
-  const { audioSettings, updateAudioSettings, models, user } = useSyntxStore();
+  const {
+    audioSettings,
+    updateAudioSettings,
+    models,
+    unavailableModels,
+    user,
+  } = useSyntxStore();
 
   const isVip = user?.role === "vip" || user?.role === "admin";
 
-  const selectedFamily =
-    AUDIO_FAMILIES.find(
-      (f) =>
-        f.id === audioSettings.modelId ||
-        f.models.some((m) => m.id === audioSettings.modelId)
-    ) ?? AUDIO_FAMILIES[0];
-
+  const catalog = [...models, ...unavailableModels].filter(
+    (model) => model.category === "audio"
+  );
+  const families = AUDIO_FAMILIES.map((family) => ({
+    ...family,
+    models: family.models.flatMap((candidate) => {
+      const live = catalog.find((model) => model.id === candidate.id);
+      return live ? [live] : [];
+    }),
+  })).filter((family) => family.models.length > 0);
   const currentModel =
-    (audioSettings.modelId
-      ? models.find((model) => model.id === audioSettings.modelId) ??
-        selectedFamily.models.find((m) => m.id === audioSettings.modelId)
-      : undefined) ??
-    (isVip
-      ? selectedFamily.models.find((m) => m.id === selectedFamily.defaultModelId)
-      : selectedFamily.models.find((m) => isBudgetModel(m.id))) ??
-    selectedFamily.models[0];
-
-  const isAllowed = isVip || modelAllowed(user, currentModel);
+    catalog.find((model) => model.id === audioSettings.modelId) ??
+    models.find((model) => model.category === "audio") ??
+    catalog[0];
+  const selectedFamily = families.find((family) =>
+    family.models.some((model) => model.id === currentModel?.id)
+  );
+  if (!currentModel || !selectedFamily) {
+    return <ModelAvailability tab="audio" />;
+  }
+  const isAllowed =
+    models.some((model) => model.id === currentModel.id) &&
+    modelAllowed(user, currentModel);
+  const disabledReason = unavailableModels.find(
+    (model) => model.id === currentModel.id
+  )?.disabledReason;
 
   const choose = (id: string) => {
-    const next =
-      models.find((model) => model.id === id) ??
-      AUDIO_MODELS.find((model) => model.id === id);
+    const next = models.find((model) => model.id === id);
     if (!next) {
       return;
     }
@@ -49,7 +59,10 @@ export const AudioSettingsPanel = () => {
       mode = "voxtral";
     } else if (next.id.includes("grok-voice")) {
       mode = "grok-voice";
-    } else if (next.id.includes("video-to-audio") || next.id.includes("foley")) {
+    } else if (
+      next.id.includes("video-to-audio") ||
+      next.id.includes("foley")
+    ) {
       mode = "video2audio";
     }
 
@@ -63,13 +76,16 @@ export const AudioSettingsPanel = () => {
   };
 
   const handleFamilyChange = (familyId: string) => {
-    const nextFam =
-      AUDIO_FAMILIES.find((f) => f.id === familyId) ?? AUDIO_FAMILIES[0];
-    const targetModel =
-      (isVip
-        ? nextFam.models.find((m) => m.id === nextFam.defaultModelId)
-        : nextFam.models.find((m) => isBudgetModel(m.id))) ?? nextFam.models[0];
-    choose(targetModel.id);
+    const family = families.find((candidate) => candidate.id === familyId);
+    const available = family?.models.filter((candidate) =>
+      models.some((model) => model.id === candidate.id)
+    );
+    const next =
+      available?.find((model) => model.id === family?.defaultModelId) ??
+      available?.[0];
+    if (next) {
+      choose(next.id);
+    }
   };
 
   const selectedModel = currentModel;
@@ -100,10 +116,18 @@ export const AudioSettingsPanel = () => {
             value={selectedFamily.id}
             onChange={(e) => handleFamilyChange(e.target.value)}
           >
-            {AUDIO_FAMILIES.map((fam) => {
+            {families.map((fam) => {
               const hasBudget = fam.models.some((m) => isBudgetModel(m.id));
               return (
-                <option value={fam.id} key={fam.id}>
+                <option
+                  value={fam.id}
+                  key={fam.id}
+                  disabled={
+                    !fam.models.some((candidate) =>
+                      models.some((model) => model.id === candidate.id)
+                    )
+                  }
+                >
                   {fam.name} {!hasBudget && !isVip ? "👑 [VIP]" : ""}
                 </option>
               );
@@ -122,10 +146,15 @@ export const AudioSettingsPanel = () => {
             onChange={(e) => choose(e.target.value)}
           >
             {selectedFamily.models.map((model) => {
-              const mAllowed = isVip || modelAllowed(user, model);
+              const mAllowed =
+                models.some((candidate) => candidate.id === model.id) &&
+                modelAllowed(user, model);
+              const reason = unavailableModels.find(
+                (candidate) => candidate.id === model.id
+              )?.disabledReason;
               return (
-                <option value={model.id} key={model.id}>
-                  {mAllowed ? "✓ " : "👑 [VIP] "}
+                <option value={model.id} key={model.id} disabled={!mAllowed}>
+                  {mAllowed ? "✓ " : `${disabledModelReason(reason)} · `}
                   {model.name} · {model.basePriceRub} ₽
                 </option>
               );
@@ -142,9 +171,7 @@ export const AudioSettingsPanel = () => {
             <select
               className={input}
               value={audioSettings.voiceId}
-              onChange={(e) =>
-                updateAudioSettings({ voiceId: e.target.value })
-              }
+              onChange={(e) => updateAudioSettings({ voiceId: e.target.value })}
             >
               {selectedModel.supportedVoices.map((voice) => (
                 <option key={voice} value={voice}>
@@ -180,14 +207,9 @@ export const AudioSettingsPanel = () => {
 
         {/* Предупреждение для пользователя, если выбрана VIP-модель на базовом тарифе */}
         {!isAllowed && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
-            <p className="font-semibold flex items-center gap-1.5">
-              <span>👑</span> Доступно только для тарифа VIP
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              Эта аудио-модель не входит в базовый тариф. Выберите модификацию с отметкой «✓» в списке выше или запросите у администратора VIP-доступ.
-            </p>
-          </div>
+          <output className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+            {disabledModelReason(disabledReason)}. Выберите доступную модель.
+          </output>
         )}
 
         <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -198,7 +220,8 @@ export const AudioSettingsPanel = () => {
       <section className="rounded-xl border bg-muted/30 p-4 text-muted-foreground">
         <p className="font-medium text-xs">Скоро в студии</p>
         <p className="mt-1.5 text-xs leading-relaxed">
-          Suno музыка и видео в аудио подключаются через официальные API провайдеров.
+          Suno музыка и видео в аудио подключаются через официальные API
+          провайдеров.
         </p>
       </section>
     </div>

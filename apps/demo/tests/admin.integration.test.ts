@@ -10,8 +10,10 @@ import { synchronizeAdmin } from "../lib/admin/bootstrap";
 import { activateAccount, renewInvitation } from "../lib/admin/invitations";
 import { auth } from "../lib/auth";
 import { db, pool } from "../lib/db";
+import { migrateSchema } from "../lib/db/migrations";
 import { session, user } from "../lib/db/schema";
 import { requireAdmin, requireUser } from "../lib/security/http";
+import { DEFAULT_USER_PERMISSIONS } from "../lib/security/permissions";
 
 const testUrl = process.env.TEST_DATABASE_URL;
 if (
@@ -62,7 +64,7 @@ databaseTests("PostgreSQL: аккаунты, права и финансовый 
       })
     );
     expect(created.user.balanceRub).toBe("1250.00");
-    expect(created.user.permissions.sections).toEqual([]);
+    expect(created.user.permissions).toEqual(DEFAULT_USER_PERMISSIONS);
     const ledger = await pool.query(
       "select count(*)::int as count, sum(amount_rub)::text as total from transactions where user_id=$1",
       [created.user.id]
@@ -226,7 +228,7 @@ databaseTests("PostgreSQL: аккаунты, права и финансовый 
       pool.query("update transactions set reason='tampered' where user_id=$1", [
         actorId,
       ])
-    ).resolves.toMatchObject({ rowCount: 0 });
+    ).rejects.toMatchObject({ code: "23514" });
     const created = await AdminService.createUser(
       actorId,
       createUserSchema.parse({
@@ -317,6 +319,32 @@ databaseTests("PostgreSQL: аккаунты, права и финансовый 
         reason: "Самоодобрение",
       })
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  test("повтор миграций сохраняет пользователей, кошельки и финансовый журнал", async () => {
+    const beforeUsers = await pool.query(
+      'SELECT id,balance_rub,reserved_rub FROM "user" ORDER BY id'
+    );
+    const beforeLedger = await pool.query(
+      "SELECT * FROM transactions ORDER BY id"
+    );
+    const beforeVersions = await pool.query(
+      "SELECT version,applied_at FROM studio_schema_migrations ORDER BY version"
+    );
+    await migrateSchema();
+    await migrateSchema();
+    const afterUsers = await pool.query(
+      'SELECT id,balance_rub,reserved_rub FROM "user" ORDER BY id'
+    );
+    const afterLedger = await pool.query(
+      "SELECT * FROM transactions ORDER BY id"
+    );
+    const afterVersions = await pool.query(
+      "SELECT version,applied_at FROM studio_schema_migrations ORDER BY version"
+    );
+    expect(afterUsers.rows).toEqual(beforeUsers.rows);
+    expect(afterLedger.rows).toEqual(beforeLedger.rows);
+    expect(afterVersions.rows).toEqual(beforeVersions.rows);
   });
 
   test("смена env пароля сохраняет аккаунт и отзывает старую сессию", async () => {

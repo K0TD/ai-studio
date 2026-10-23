@@ -71,7 +71,7 @@ services:
       [
         sh,
         -c,
-        "mkdir -p /data/media /app/storage/database /app/storage/logs && chown -R 1001:1001 /data/media /app/storage /work && chmod -R 0775 /data/media /app/storage /work",
+        "mkdir -p /data/media /app/storage/database /app/storage/logs && chown -R 1001:1001 /data/media /app/storage /work && find /data/media /app/storage /work -type d -exec chmod 0750 {} + && find /data/media /app/storage /work -type f -exec chmod 0640 {} +",
       ]
 
   web:
@@ -136,6 +136,8 @@ services:
     security_opt: [no-new-privileges:true]
     tmpfs: ["/tmp:mode=1777,size=128m"]
     environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      SQLITE_PATH: /app/storage/database/studio.sqlite
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER:-studio}
       PGPASSWORD: ${POSTGRES_PASSWORD:-studio}

@@ -1,41 +1,212 @@
 "use client";
-import {
-  IMAGE_FAMILIES,
-  IMAGE_MODELS,
-  isBudgetModel,
-} from "@/lib/routerai/models-catalog";
-import { modelAllowed } from "@/lib/store/client-policy";
+import { IMAGE_FAMILIES, isBudgetModel } from "@/lib/routerai/models-catalog";
+import type { ModelMetadata } from "@/lib/routerai/types";
+import { disabledModelReason, modelAllowed } from "@/lib/store/client-policy";
 import { useSyntxStore } from "@/lib/store/syntx-store";
+
+import { ModelAvailability } from "../shell/model-availability";
 const input =
   "w-full rounded-lg border border-border bg-background p-2 text-xs";
+interface ImageParametersProps {
+  selectedModel: ModelMetadata;
+}
+const ImageParameters = ({ selectedModel }: ImageParametersProps) => {
+  const { imageSettings, updateImageSettings } = useSyntxStore();
+  return (
+    <section className="grid gap-4 rounded-xl border bg-card/60 p-4">
+      <h2 className="font-semibold">Параметры</h2>
+      <label className="grid gap-2">
+        Соотношение сторон
+        <select
+          className={input}
+          value={imageSettings.aspectRatio}
+          onChange={(e) => updateImageSettings({ aspectRatio: e.target.value })}
+        >
+          <option value="auto">Auto</option>
+          {selectedModel.supportedAspectRatios
+            ?.filter((r) => r !== "auto" && r !== "Auto")
+            .map((ratio) => (
+              <option key={ratio}>{ratio}</option>
+            ))}
+        </select>
+      </label>
+      {selectedModel.supportedResolutions?.length ? (
+        <label className="grid gap-2">
+          Разрешение
+          <select
+            className={input}
+            value={imageSettings.resolution}
+            onChange={(e) =>
+              updateImageSettings({ resolution: e.target.value })
+            }
+          >
+            {selectedModel.supportedResolutions.map((res) => (
+              <option key={res}>{res}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {selectedModel.supportedQualities?.length ? (
+        <label className="grid gap-2">
+          Качество
+          <select
+            className={input}
+            value={imageSettings.quality}
+            onChange={(e) => updateImageSettings({ quality: e.target.value })}
+          >
+            <option value="auto">Auto</option>
+            {selectedModel.supportedQualities
+              .filter((q) => q !== "auto")
+              .map((quality) => (
+                <option key={quality}>{quality}</option>
+              ))}
+          </select>
+        </label>
+      ) : null}
+      <label className="grid gap-2">
+        Количество
+        <select
+          className={input}
+          value={imageSettings.n}
+          onChange={(e) => updateImageSettings({ n: Number(e.target.value) })}
+        >
+          {Array.from(
+            { length: Math.min(selectedModel.maxImageCount ?? 1, 4) },
+            (_, index) => (
+              <option value={index + 1} key={index}>
+                {index + 1}
+              </option>
+            )
+          )}
+        </select>
+      </label>
+      <label className="grid gap-2">
+        Формат
+        <select
+          className={input}
+          value={imageSettings.outputFormat}
+          onChange={(e) => {
+            const outputFormat = e.target.value;
+            if (
+              outputFormat === "png" ||
+              outputFormat === "jpeg" ||
+              outputFormat === "webp" ||
+              outputFormat === "svg"
+            ) {
+              updateImageSettings({ outputFormat });
+            }
+          }}
+        >
+          {(selectedModel.supportedOutputFormats?.length
+            ? selectedModel.supportedOutputFormats
+            : ["png"]
+          ).map((format) => (
+            <option value={format} key={format}>
+              {format.toUpperCase()}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selectedModel.supportedBackgrounds?.length ? (
+        <label className="grid gap-2">
+          Фон
+          <select
+            className={input}
+            value={imageSettings.background}
+            onChange={(e) => {
+              const background = e.target.value;
+              if (
+                background === "auto" ||
+                background === "transparent" ||
+                background === "opaque"
+              ) {
+                updateImageSettings({ background });
+              }
+            }}
+          >
+            <option value="auto">Auto</option>
+            {selectedModel.supportedBackgrounds
+              .filter((b) => b !== "auto")
+              .map((background) => (
+                <option key={background}>{background}</option>
+              ))}
+          </select>
+        </label>
+      ) : null}
+      {selectedModel.supportsSeed && (
+        <label className="grid gap-2">
+          Seed
+          <input
+            className={input}
+            type="number"
+            min={0}
+            max={2_147_483_647}
+            value={imageSettings.seed ?? ""}
+            onChange={(e) =>
+              updateImageSettings({
+                seed: e.target.value ? Number(e.target.value) : undefined,
+              })
+            }
+          />
+        </label>
+      )}
+      {selectedModel.supportsNegativePrompt && (
+        <label className="grid gap-2">
+          Исключить из результата
+          <textarea
+            className={input}
+            maxLength={2000}
+            value={imageSettings.negativePrompt ?? ""}
+            onChange={(e) =>
+              updateImageSettings({ negativePrompt: e.target.value })
+            }
+          />
+        </label>
+      )}
+    </section>
+  );
+};
+
 export const ImageSettingsPanel = () => {
-  const { models, imageSettings, updateImageSettings, user } = useSyntxStore();
+  const {
+    models,
+    unavailableModels,
+    imageSettings,
+    updateImageSettings,
+    user,
+  } = useSyntxStore();
 
   const isVip = user?.role === "vip" || user?.role === "admin";
 
-  const selectedFamily =
-    IMAGE_FAMILIES.find(
-      (f) =>
-        f.id === imageSettings.modelId ||
-        f.models.some((m) => m.id === imageSettings.modelId)
-    ) ?? IMAGE_FAMILIES[0];
-
+  const catalog = [...models, ...unavailableModels].filter(
+    (model) => model.category === "image"
+  );
+  const families = IMAGE_FAMILIES.map((family) => ({
+    ...family,
+    models: family.models.flatMap((candidate) => {
+      const live = catalog.find((model) => model.id === candidate.id);
+      return live ? [live] : [];
+    }),
+  })).filter((family) => family.models.length > 0);
   const currentModel =
-    (imageSettings.modelId
-      ? models.find((model) => model.id === imageSettings.modelId) ??
-        selectedFamily.models.find((m) => m.id === imageSettings.modelId)
-      : undefined) ??
-    (isVip
-      ? selectedFamily.models.find((m) => m.id === selectedFamily.defaultModelId)
-      : selectedFamily.models.find((m) => isBudgetModel(m.id))) ??
-    selectedFamily.models[0];
-
-  const isAllowed = isVip || modelAllowed(user, currentModel);
+    catalog.find((model) => model.id === imageSettings.modelId) ??
+    models.find((model) => model.category === "image") ??
+    catalog[0];
+  const selectedFamily = families.find((family) =>
+    family.models.some((model) => model.id === currentModel?.id)
+  );
+  if (!currentModel || !selectedFamily) {
+    return <ModelAvailability tab="image" />;
+  }
+  const isAllowed =
+    models.some((model) => model.id === currentModel.id) &&
+    modelAllowed(user, currentModel);
+  const disabledReason = unavailableModels.find(
+    (model) => model.id === currentModel.id
+  )?.disabledReason;
 
   const choose = (id: string) => {
-    const next =
-      models.find((model) => model.id === id) ??
-      IMAGE_MODELS.find((model) => model.id === id);
+    const next = models.find((model) => model.id === id);
     if (!next) {
       return;
     }
@@ -54,13 +225,16 @@ export const ImageSettingsPanel = () => {
   };
 
   const handleFamilyChange = (familyId: string) => {
-    const nextFam =
-      IMAGE_FAMILIES.find((f) => f.id === familyId) ?? IMAGE_FAMILIES[0];
-    const targetModel =
-      (isVip
-        ? nextFam.models.find((m) => m.id === nextFam.defaultModelId)
-        : nextFam.models.find((m) => isBudgetModel(m.id))) ?? nextFam.models[0];
-    choose(targetModel.id);
+    const family = families.find((candidate) => candidate.id === familyId);
+    const available = family?.models.filter((candidate) =>
+      models.some((model) => model.id === candidate.id)
+    );
+    const next =
+      available?.find((model) => model.id === family?.defaultModelId) ??
+      available?.[0];
+    if (next) {
+      choose(next.id);
+    }
   };
 
   const selectedModel = currentModel;
@@ -91,10 +265,18 @@ export const ImageSettingsPanel = () => {
             value={selectedFamily.id}
             onChange={(e) => handleFamilyChange(e.target.value)}
           >
-            {IMAGE_FAMILIES.map((fam) => {
+            {families.map((fam) => {
               const hasBudget = fam.models.some((m) => isBudgetModel(m.id));
               return (
-                <option value={fam.id} key={fam.id}>
+                <option
+                  value={fam.id}
+                  key={fam.id}
+                  disabled={
+                    !fam.models.some((candidate) =>
+                      models.some((model) => model.id === candidate.id)
+                    )
+                  }
+                >
                   {fam.name} {!hasBudget && !isVip ? "👑 [VIP]" : ""}
                 </option>
               );
@@ -113,10 +295,15 @@ export const ImageSettingsPanel = () => {
             onChange={(e) => choose(e.target.value)}
           >
             {selectedFamily.models.map((model) => {
-              const mAllowed = isVip || modelAllowed(user, model);
+              const mAllowed =
+                models.some((candidate) => candidate.id === model.id) &&
+                modelAllowed(user, model);
+              const reason = unavailableModels.find(
+                (candidate) => candidate.id === model.id
+              )?.disabledReason;
               return (
-                <option value={model.id} key={model.id}>
-                  {mAllowed ? "✓ " : "👑 [VIP] "}
+                <option value={model.id} key={model.id} disabled={!mAllowed}>
+                  {mAllowed ? "✓ " : `${disabledModelReason(reason)} · `}
                   {model.name} · {model.basePriceRub} ₽
                 </option>
               );
@@ -149,173 +336,16 @@ export const ImageSettingsPanel = () => {
 
         {/* Предупреждение для пользователя, если выбрана VIP-модель на базовом тарифе */}
         {!isAllowed && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
-            <p className="font-semibold flex items-center gap-1.5">
-              <span>👑</span> Доступно только для тарифа VIP
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              Эта модель не входит в базовый тариф. Выберите модификацию с отметкой «✓» в списке выше или запросите у администратора VIP-доступ.
-            </p>
-          </div>
+          <output className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+            {disabledModelReason(disabledReason)}. Выберите доступную модель.
+          </output>
         )}
 
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {selectedModel.description ?? selectedFamily.description}
         </p>
       </section>
-      <section className="grid gap-4 rounded-xl border bg-card/60 p-4">
-        <h2 className="font-semibold">Параметры</h2>
-        <label className="grid gap-2">
-          Соотношение сторон
-          <select
-            className={input}
-            value={imageSettings.aspectRatio}
-            onChange={(e) =>
-              updateImageSettings({ aspectRatio: e.target.value })
-            }
-          >
-            <option value="auto">Auto</option>
-            {selectedModel.supportedAspectRatios
-              ?.filter((r) => r !== "auto" && r !== "Auto")
-              .map((ratio) => (
-                <option key={ratio}>{ratio}</option>
-              ))}
-          </select>
-        </label>
-        {selectedModel.supportedResolutions?.length ? (
-          <label className="grid gap-2">
-            Разрешение
-            <select
-              className={input}
-              value={imageSettings.resolution}
-              onChange={(e) =>
-                updateImageSettings({ resolution: e.target.value })
-              }
-            >
-              {selectedModel.supportedResolutions.map((res) => (
-                <option key={res}>{res}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        {selectedModel.supportedQualities?.length ? (
-          <label className="grid gap-2">
-            Качество
-            <select
-              className={input}
-              value={imageSettings.quality}
-              onChange={(e) => updateImageSettings({ quality: e.target.value })}
-            >
-              <option value="auto">Auto</option>
-              {selectedModel.supportedQualities
-                .filter((q) => q !== "auto")
-                .map((quality) => (
-                  <option key={quality}>{quality}</option>
-                ))}
-            </select>
-          </label>
-        ) : null}
-        <label className="grid gap-2">
-          Количество
-          <select
-            className={input}
-            value={imageSettings.n}
-            onChange={(e) => updateImageSettings({ n: Number(e.target.value) })}
-          >
-            {Array.from(
-              { length: Math.min(selectedModel.maxImageCount ?? 1, 4) },
-              (_, index) => (
-                <option value={index + 1} key={index}>
-                  {index + 1}
-                </option>
-              )
-            )}
-          </select>
-        </label>
-        <label className="grid gap-2">
-          Формат
-          <select
-            className={input}
-            value={imageSettings.outputFormat}
-            onChange={(e) => {
-              const outputFormat = e.target.value;
-              if (
-                outputFormat === "png" ||
-                outputFormat === "jpeg" ||
-                outputFormat === "webp" ||
-                outputFormat === "svg"
-              ) {
-                updateImageSettings({ outputFormat });
-              }
-            }}
-          >
-            {(selectedModel.supportedOutputFormats?.length
-              ? selectedModel.supportedOutputFormats
-              : ["png"]
-            ).map((format) => (
-              <option value={format} key={format}>
-                {format.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selectedModel.supportedBackgrounds?.length ? (
-          <label className="grid gap-2">
-            Фон
-            <select
-              className={input}
-              value={imageSettings.background}
-              onChange={(e) => {
-                const background = e.target.value;
-                if (
-                  background === "auto" ||
-                  background === "transparent" ||
-                  background === "opaque"
-                ) {
-                  updateImageSettings({ background });
-                }
-              }}
-            >
-              <option value="auto">Auto</option>
-              {selectedModel.supportedBackgrounds
-                .filter((b) => b !== "auto")
-                .map((background) => (
-                  <option key={background}>{background}</option>
-                ))}
-            </select>
-          </label>
-        ) : null}
-        {selectedModel.supportsSeed && (
-          <label className="grid gap-2">
-            Seed
-            <input
-              className={input}
-              type="number"
-              min={0}
-              max={2_147_483_647}
-              value={imageSettings.seed ?? ""}
-              onChange={(e) =>
-                updateImageSettings({
-                  seed: e.target.value ? Number(e.target.value) : undefined,
-                })
-              }
-            />
-          </label>
-        )}
-        {selectedModel.supportsNegativePrompt && (
-          <label className="grid gap-2">
-            Исключить из результата
-            <textarea
-              className={input}
-              maxLength={2000}
-              value={imageSettings.negativePrompt ?? ""}
-              onChange={(e) =>
-                updateImageSettings({ negativePrompt: e.target.value })
-              }
-            />
-          </label>
-        )}
-      </section>
+      <ImageParameters selectedModel={selectedModel} />
     </div>
   );
 };

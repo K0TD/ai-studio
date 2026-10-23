@@ -158,22 +158,24 @@ describe("Generation boundaries and authoritative pricing", () => {
     expect(model.enabled).toBe(true);
     expect(estimate(model, {}, "а".repeat(1000))).toBe("1.62");
   });
-  test("admin role cannot bypass explicit model permissions", () => {
+  test("admin and VIP roles retain implicit model access", () => {
     const model = normalizeCatalogModel(VIDEO_MODELS[0], undefined, null);
-    expect(
-      permittedModel(
-        {
-          permissions: {
-            dailyLimitRub: null,
-            maxConcurrentJobs: 1,
-            modelIds: [],
-            sections: [],
+    for (const role of ["admin", "vip"] as const) {
+      expect(
+        permittedModel(
+          {
+            permissions: {
+              dailyLimitRub: null,
+              maxConcurrentJobs: 1,
+              modelIds: [],
+              sections: [],
+            },
+            role,
           },
-          role: "admin",
-        },
-        model
-      )
-    ).toBe(false);
+          model
+        )
+      ).toBe(true);
+    }
   });
   test("unsupported capabilities are rejected before a paid request", () => {
     const model = normalizeCatalogModel(

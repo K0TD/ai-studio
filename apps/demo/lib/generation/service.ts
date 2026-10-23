@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { PoolClient } from "pg";
-
 import { parseRub, formatKopecks } from "@/lib/billing/money";
-import { pool } from "@/lib/db";
+import { pool, sumRubSql } from "@/lib/db";
+import type { DatabaseClient } from "@/lib/db";
 import { toIsoDate } from "@/lib/db/date";
+import { isBudgetModel } from "@/lib/routerai/models-catalog";
 import { ApiError } from "@/lib/security/http";
 import type { AuthUser } from "@/lib/security/http";
 
-import { isBudgetModel } from "@/lib/routerai/models-catalog";
 import { requireModel, permittedModel, estimate } from "./catalog";
 import {
   normalizedSettings,
@@ -16,7 +15,7 @@ import {
   requestHash,
 } from "./contracts";
 import type { GenerationRequest } from "./contracts";
-import type { JobRow, WalletRow, QuoteRow } from "./rows";
+import type { ArtifactRow, JobRow, WalletRow, QuoteRow } from "./rows";
 
 export const assertAccountAccess = (
   account: {
@@ -33,7 +32,11 @@ export const assertAccountAccess = (
     throw new ApiError(403, "Аккаунт заблокирован", "ACCOUNT_BANNED");
   }
   if (!account.is_approved) {
-    throw new ApiError(403, "Аккаунт ожидает одобрения", "ACCOUNT_NOT_APPROVED");
+    throw new ApiError(
+      403,
+      "Аккаунт ожидает одобрения",
+      "ACCOUNT_NOT_APPROVED"
+    );
   }
   if (!account.activated_at && account.role !== "admin") {
     throw new ApiError(
@@ -68,7 +71,7 @@ export const assertAccountAccess = (
 };
 
 const checkOwnedRequest = async (
-  client: { query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number }> },
+  client: Pick<DatabaseClient, "query">,
   accountId: string,
   request: GenerationRequest
 ) => {
@@ -176,7 +179,7 @@ export const jobItem = (row: JobRow, artifacts: { id: string }[] = []) => {
 };
 
 export const getJob = async (userId: string, id: string) => {
-  const queryResult9 = await pool.query(
+  const queryResult9 = await pool.query<JobRow>(
     "SELECT * FROM syntx_jobs WHERE id=$1 AND user_id=$2",
     [id, userId]
   );
@@ -184,7 +187,7 @@ export const getJob = async (userId: string, id: string) => {
   if (!row) {
     throw new ApiError(404, "Задание не найдено", "JOB_NOT_FOUND");
   }
-  const queryResult10 = await pool.query(
+  const queryResult10 = await pool.query<Pick<ArtifactRow, "id">>(
     "SELECT id FROM syntx_artifacts WHERE job_id=$1 AND user_id=$2 ORDER BY ordinal",
     [id, userId]
   );
@@ -263,7 +266,7 @@ export const submitGeneration = async (
       };
       await checkOwnedRequest(client, account.id, normalized);
       const queryResult7 = await client.query(
-        "SELECT count(*)::int AS count,coalesce(sum(max_cost_rub),0)::text AS held FROM syntx_jobs WHERE user_id=$1 AND settled_at IS NULL",
+        `SELECT count(*)::int AS count,${sumRubSql("max_cost_rub")} AS held FROM syntx_jobs WHERE user_id=$1 AND settled_at IS NULL`,
         [account.id]
       );
       const [active] = queryResult7.rows;
@@ -287,7 +290,7 @@ export const submitGeneration = async (
       }
       if (owner.permissions.dailyLimitRub !== null) {
         const queryResult8 = await client.query(
-          "SELECT coalesce(-sum(amount_rub),0)::text AS amount FROM transactions WHERE user_id=$1 AND type='generation_cost' AND created_at>=date_trunc('day',now() AT TIME ZONE 'Europe/Moscow') AT TIME ZONE 'Europe/Moscow'",
+          `SELECT ${sumRubSql("amount_rub", true)} AS amount FROM transactions WHERE user_id=$1 AND type='generation_cost' AND created_at>=date_trunc('day',now() AT TIME ZONE 'Europe/Moscow') AT TIME ZONE 'Europe/Moscow'`,
           [account.id]
         );
         const [charged] = queryResult8.rows;
@@ -329,7 +332,7 @@ export const submitGeneration = async (
         [account.id, nextReserved]
       );
       await client.query(
-        "INSERT INTO transactions (id,user_id,job_id,amount_rub,type,reason,balance_before_rub,balance_after_rub,idempotency_key) VALUES ($1,$2,$3,0,'generation_reserve',$4,$5,$5,$6)",
+        "INSERT INTO transactions (id,user_id,job_id,amount_rub,type,reason,balance_before_rub,balance_after_rub,idempotency_key) VALUES ($1,$2,$3,'0.00','generation_reserve',$4,$5,$5,$6)",
         [
           randomUUID(),
           account.id,
@@ -359,14 +362,13 @@ export const listJobs = async (
     [userId, options.chatId ?? null, options.cursor ?? null]
   );
   const visible = rows.slice(0, 50);
-  const artifacts = visible.length
-    ? (
-        await pool.query(
-          "SELECT id,job_id FROM syntx_artifacts WHERE user_id=$1 AND job_id=ANY($2::text[]) ORDER BY ordinal",
-          [userId, visible.map((r) => r.id)]
-        )
-      ).rows
-    : [];
+  const artifactRows = visible.length
+    ? await pool.query<Pick<ArtifactRow, "id" | "job_id">>(
+        "SELECT id,job_id FROM syntx_artifacts WHERE user_id=$1 AND job_id=ANY($2::text[]) ORDER BY ordinal",
+        [userId, visible.map((r) => r.id)]
+      )
+    : { rows: [] };
+  const artifacts = artifactRows.rows;
   return {
     items: visible.map((r) =>
       jobItem(

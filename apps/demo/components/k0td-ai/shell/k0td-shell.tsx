@@ -82,6 +82,17 @@ const AccountStatus = () => {
     </output>
   );
 };
+const ConnectionStatus = () => {
+  const error = useK0tdStore((state) => state.serverError);
+  return error ? (
+    <output
+      role="alert"
+      className="border-b bg-amber-50 p-3 text-center text-sm text-amber-900"
+    >
+      Не удалось обновить данные: {error}. Повторяем подключение…
+    </output>
+  ) : null;
+};
 export const K0tdShell = () => {
   useServerRefresh();
   const refreshServer = useK0tdStore((state) => state.refreshServer);
@@ -110,7 +121,7 @@ export const K0tdShell = () => {
     }
     setMobileSettingsOpen(true);
   };
-  if (serverError) {
+  if (serverError && !serverReady) {
     return (
       <main className="grid min-h-dvh place-items-center bg-k0td-bg p-6">
         <div className="max-w-md rounded-3xl border bg-card p-7">
@@ -148,6 +159,7 @@ export const K0tdShell = () => {
       {/* 1. Header is full-width at the very top of the app, never covered or shifted */}
       <SyntxHeader onOpenSidebar={() => setMobileSidebarOpen(true)} />
 
+      <ConnectionStatus />
       <AccountStatus />
       {/* 2. Main content area strictly below the header */}
       <div className="relative flex min-h-0 flex-1 w-full overflow-hidden">

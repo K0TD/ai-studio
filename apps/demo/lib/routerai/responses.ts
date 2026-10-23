@@ -7,8 +7,12 @@ const nonnegativePrice = z
   ])
   .transform(Number)
   .refine(Number.isFinite)
-  .optional();
-export const usageSchema = z.object({ cost: nonnegativePrice }).optional();
+  .nullish()
+  .transform((value) => value ?? undefined);
+export const usageSchema = z
+  .object({ cost: nonnegativePrice })
+  .nullish()
+  .transform((value) => value ?? undefined);
 export const videoResponseSchema = z.object({
   error: z
     .union([z.string(), z.object({ message: z.string().optional() })])
@@ -27,35 +31,43 @@ export const videoResponseSchema = z.object({
   usage: usageSchema,
 });
 const imagePart = z.object({
-  image_url: z.object({ url: z.string() }).optional(),
-  inline_data: z.object({ data: z.string(), mime_type: z.string() }).optional(),
+  image_url: z.object({ url: z.string() }).nullish(),
+  inlineData: z.object({ data: z.string(), mimeType: z.string() }).nullish(),
+  inline_data: z.object({ data: z.string(), mime_type: z.string() }).nullish(),
   type: z.string().optional(),
 });
 const imageMessage = z.object({
-  content: z.union([z.string(), z.array(imagePart)]).optional(),
+  content: z.union([z.string(), z.array(imagePart)]).nullish(),
   images: z
     .array(
       z.union([
         z.string(),
         z.object({
-          image_url: z.object({ url: z.string() }).optional(),
+          image_url: z.object({ url: z.string() }).nullish(),
           url: z.string().optional(),
         }),
       ])
     )
     .max(4)
-    .optional(),
-  parts: z.array(imagePart).optional(),
+    .nullish(),
+  parts: z.array(imagePart).nullish(),
 });
 export const imageResponseSchema = z.object({
-  choices: z.array(z.object({ message: imageMessage })).optional(),
+  choices: z
+    .array(
+      z.object({
+        finish_reason: z.string().nullish(),
+        message: imageMessage,
+      })
+    )
+    .nullish(),
   data: z
     .array(
-      z.object({ b64_json: z.string().optional(), url: z.string().optional() })
+      z.object({ b64_json: z.string().nullish(), url: z.string().nullish() })
     )
     .max(4)
-    .optional(),
-  id: z.string().optional(),
+    .nullish(),
+  id: z.string().max(300).optional(),
   usage: usageSchema,
 });
 export const uploadResponseSchema = z.object({
@@ -156,7 +168,7 @@ const providerImageUrl = (
   }
   const structured = z
     .object({
-      image_url: z.object({ url: z.string() }).optional(),
+      image_url: z.object({ url: z.string() }).nullish(),
       url: z.string().optional(),
     })
     .parse(image);
@@ -169,16 +181,23 @@ export const geminiImageUrls = (result: ImageResponse): string[] => {
     .map(providerImageUrl)
     .filter((url) => url !== undefined);
   const content = z.array(imagePart).safeParse(message?.content);
-  for (const part of content.success ? content.data : (message?.parts ?? [])) {
+  for (const part of [
+    ...(content.success ? content.data : []),
+    ...(message?.parts ?? []),
+  ]) {
     if (part.image_url) {
       urls.push(part.image_url.url);
     } else if (part.inline_data) {
       urls.push(
         `data:${part.inline_data.mime_type};base64,${part.inline_data.data}`
       );
+    } else if (part.inlineData) {
+      urls.push(
+        `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`
+      );
     }
   }
-  return urls;
+  return [...new Set(urls)].filter(Boolean);
 };
 export const nativeImageUrls = (
   result: ImageResponse,
@@ -187,7 +206,8 @@ export const nativeImageUrls = (
   const urls: string[] = [];
   for (const image of result.data ?? []) {
     if (image.b64_json) {
-      urls.push(`data:image/${format};base64,${image.b64_json}`);
+      const mime = format === "svg" ? "image/svg+xml" : `image/${format}`;
+      urls.push(`data:${mime};base64,${image.b64_json}`);
     } else if (image.url) {
       urls.push(image.url);
     }

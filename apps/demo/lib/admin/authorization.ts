@@ -1,8 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 
 import { isPostgres } from "../db";
-import * as pgSchema from "../db/schema";
-import * as sqliteSchema from "../db/sqlite-schema";
+import * as s from "../db/active-schema";
 import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 
@@ -11,8 +10,7 @@ export const lockAdminUsers = async (
   actorId: string,
   targetId: string
 ) => {
-  const s = isPostgres ? pgSchema : sqliteSchema;
-  const query = (tx as any)
+  const query = tx
     .select()
     .from(s.user)
     .where(inArray(s.user.id, [actorId, targetId]))
@@ -20,7 +18,7 @@ export const lockAdminUsers = async (
 
   const accounts = isPostgres ? await query.for("update") : await query;
 
-  const actor = accounts.find((account: any) => account.id === actorId);
+  const actor = accounts.find((account) => account.id === actorId);
   if (
     !actor ||
     actor.role !== "admin" ||
@@ -30,7 +28,7 @@ export const lockAdminUsers = async (
   ) {
     throw new ApiError(403, "Требуются права администратора");
   }
-  const target = accounts.find((account: any) => account.id === targetId);
+  const target = accounts.find((account) => account.id === targetId);
   if (!target) {
     throw new ApiError(404, "Пользователь не найден");
   }
@@ -38,8 +36,7 @@ export const lockAdminUsers = async (
 };
 
 export const lockAdmin = async (tx: DatabaseTransaction, actorId: string) => {
-  const s = isPostgres ? pgSchema : sqliteSchema;
-  const query = (tx as any).select().from(s.user).where(eq(s.user.id, actorId));
+  const query = tx.select().from(s.user).where(eq(s.user.id, actorId));
   const [actor] = isPostgres ? await query.for("update") : await query;
 
   if (

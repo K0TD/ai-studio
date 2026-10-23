@@ -93,13 +93,21 @@ export const downloadMedia = async (
   const response = await responsePending.promise;
   if (response.statusCode !== 200) {
     response.destroy();
-    throw new Error(`Provider media download rejected: status ${response.statusCode}`);
+    throw new Error(
+      `Provider media download rejected: status ${response.statusCode}`
+    );
   }
   let [mime] = (response.headers["content-type"] ?? "").split(";");
   mime = mime.trim().toLowerCase();
-  if (mime === "image/jpg") mime = "image/jpeg";
-  if (mime === "audio/mp3") mime = "audio/mpeg";
-  if (mime === "audio/x-wav") mime = "audio/wav";
+  if (mime === "image/jpg") {
+    mime = "image/jpeg";
+  }
+  if (mime === "audio/mp3") {
+    mime = "audio/mpeg";
+  }
+  if (mime === "audio/x-wav") {
+    mime = "audio/wav";
+  }
   if (
     !/^(image\/(png|jpeg|webp|svg\+xml)|audio\/(mpeg|wav)|video\/mp4|application\/octet-stream)$/u.test(
       mime

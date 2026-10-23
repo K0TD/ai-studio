@@ -20,11 +20,29 @@ const runtimeSchema = z.object({
       !parsed.password
     );
   }),
-  DATABASE_URL: z.string().optional(),
+  DATABASE_URL: z
+    .string()
+    .trim()
+    .refine((value) => {
+      if (!value) {
+        return true;
+      }
+      try {
+        const url = new URL(value);
+        return (
+          ["postgres:", "postgresql:"].includes(url.protocol) &&
+          Boolean(url.hostname) &&
+          url.pathname.length > 1
+        );
+      } catch {
+        return false;
+      }
+    }, "DATABASE_URL должен быть пустым для SQLite или содержать PostgreSQL URL")
+    .optional(),
   MEDIA_ROOT: z.string().refine(isAbsolute),
   ROUTERAI_API_KEY: z.string().min(8),
-  SQLITE_PATH: z.string().optional(),
-  STORAGE_ROOT: z.string().optional(),
+  SQLITE_PATH: z.string().refine(isAbsolute).optional(),
+  STORAGE_ROOT: z.string().refine(isAbsolute).optional(),
 });
 export const validateRuntimeEnv = () => {
   const parsed = runtimeSchema.safeParse(process.env);

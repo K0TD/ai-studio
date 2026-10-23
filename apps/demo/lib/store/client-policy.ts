@@ -39,10 +39,10 @@ export const sectionAllowed = (
     !account.isBanned &&
     account.isApproved &&
     (account.role === "admin" ||
-     account.role === "vip" ||
-     !account.permissions?.sections ||
-     account.permissions.sections.length === 0 ||
-     account.permissions.sections.includes(section))
+      account.role === "vip" ||
+      !account.permissions?.sections ||
+      account.permissions.sections.length === 0 ||
+      account.permissions.sections.includes(section))
   );
 export const modelAllowed = (
   account: {

@@ -1,7 +1,10 @@
 import { synchronizeAdmin } from "../lib/admin/bootstrap";
-import { ensureDatabase } from "../lib/db/auto-migrate";
 import { pool } from "../lib/db";
+import { ensureDatabase } from "../lib/db/auto-migrate";
 import { validateRuntimeEnv } from "../lib/env";
+import { initLogging } from "../lib/logging";
+
+initLogging("startup");
 
 try {
   const settings = validateRuntimeEnv();

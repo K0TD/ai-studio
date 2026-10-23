@@ -134,7 +134,7 @@ const chatItem = (row: ChatRow) => ({
 });
 export const chatsGet = apiRoute(async (request) => {
   const user = await requireUser(request);
-  const { rows } = await pool.query(
+  const { rows } = await pool.query<ChatRow>(
     "SELECT * FROM syntx_chats WHERE user_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 500",
     [user.id]
   );
@@ -151,7 +151,7 @@ export const chatsPost = apiRoute(async (request) => {
   if (!user.isApproved || !sectionAllowed) {
     throw new ApiError(403, "Доступ к разделу закрыт");
   }
-  const result = await pool.query(
+  const result = await pool.query<ChatRow>(
     "INSERT INTO syntx_chats (id,user_id,title,tab) VALUES ($1,$2,$3,$4) RETURNING *",
     [randomUUID(), user.id, body.title, body.tab]
   );
@@ -169,7 +169,7 @@ export const chatPatch = apiRoute(async (request, context: Context) => {
       })
       .refine((value) => Object.keys(value).length > 0)
   );
-  const result = await pool.query(
+  const result = await pool.query<ChatRow>(
     "UPDATE syntx_chats SET title=coalesce($3,title),is_favorite=coalesce($4,is_favorite) WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING *",
     [id, user.id, body.title ?? null, body.isFavorite ?? null]
   );
@@ -193,7 +193,9 @@ export const filesPost = apiRoute(async (request) => {
   const uploadAllowed =
     user.role === "admin" ||
     user.role === "vip" ||
-    user.permissions?.sections?.some((s: string) => s === "video" || s === "image");
+    user.permissions?.sections?.some(
+      (s: string) => s === "video" || s === "image"
+    );
   if (!user.isApproved || !uploadAllowed) {
     throw new ApiError(403, "Загрузка референсов недоступна");
   }
@@ -368,8 +370,8 @@ export const adminJobsGet = apiRoute(async (request) => {
       ...jobItem(r),
       providerCostRub: r.provider_cost_rub,
       providerId: r.provider_id,
-      settledAt: r.settled_at,
-      submittedAt: r.submitted_at,
+      settledAt: r.settled_at === null ? null : toIsoDate(r.settled_at),
+      submittedAt: r.submitted_at === null ? null : toIsoDate(r.submitted_at),
       userId: r.user_id,
       varianceRub: r.variance_rub,
     })),

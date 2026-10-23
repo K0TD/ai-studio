@@ -12,6 +12,7 @@ import {
   saveMedia,
 } from "@/lib/media/storage";
 import { limitedBody, routerai, RouterAIError } from "@/lib/routerai/client";
+import type { ProviderFailureContext } from "@/lib/routerai/error";
 import type { VideoGenerateRequest } from "@/lib/routerai/types";
 import { ApiError } from "@/lib/security/http";
 
@@ -52,24 +53,10 @@ export const workerHeartbeatIsHealthy = async (): Promise<boolean> => {
 };
 
 const claimJob = async (): Promise<Job | null> => {
-  // Expired submissions without a provider ID were never accepted by the provider; auto-release them
-  const deadSubmissions = await pool.query<{ id: string }>(
-    "SELECT id FROM syntx_jobs WHERE status='submitting' AND provider_id IS NULL AND leased_until<now() AND settled_at IS NULL"
-  );
-  for (const s of deadSubmissions.rows) {
-    try {
-      await settleJob({
-        jobId: s.id,
-        reason: "Таймаут отправки запроса: провайдер не ответил; резерв возвращён",
-        status: "failed",
-      });
-    } catch {
-      // ignore
-    }
-  }
-  // Submissions with a confirmed provider_id are held for reconciliation
+  // A lost POST response does not prove the provider declined the request.
+  // Fence the old worker and keep the reserve until its outcome is reconciled.
   await pool.query(
-    "UPDATE syntx_jobs SET status='reconciling',error='Не удалось подтвердить результат у провайдера. Резерв сохранён до сверки.',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE status='submitting' AND provider_id IS NOT NULL AND leased_until<now() AND settled_at IS NULL"
+    "UPDATE syntx_jobs SET status='reconciling',error='Не удалось подтвердить результат у провайдера. Резерв сохранён до сверки.',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE status='submitting' AND (leased_until<now() OR (leased_until IS NULL AND submitted_at<now()-interval '5 minutes')) AND settled_at IS NULL"
   );
   const token = randomUUID();
   const result = await pool.query<JobRow>(
@@ -104,10 +91,15 @@ const recordProvider = async (
   job.status = status;
   job.provider_id = providerId ?? job.provider_id;
 };
-const markReconciling = async (job: Job) => {
+const markReconciling = async (job: Job, context?: ProviderFailureContext) => {
   await pool.query(
-    "UPDATE syntx_jobs SET status='reconciling',error='Результат запроса не подтверждён. Средства остаются в резерве до сверки.',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND settled_at IS NULL",
-    [job.id, job.lease_token]
+    "UPDATE syntx_jobs SET status='reconciling',error='Результат запроса не подтверждён. Средства остаются в резерве до сверки.',provider_id=coalesce($3,provider_id),provider_result=coalesce($4,provider_result),lease_token=NULL,leased_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND settled_at IS NULL",
+    [
+      job.id,
+      job.lease_token,
+      context?.generationId ?? null,
+      context ? JSON.stringify(context) : null,
+    ]
   );
   console.error(
     JSON.stringify({ event: "generation.reconciling", jobId: job.id })
@@ -123,14 +115,13 @@ const retryLater = async (job: Job) => {
 const prepareReferences = async (job: Job) => {
   const { request } = job;
   const ids = referencedFileIds(request.settings);
-  const rows = ids.length
-    ? (
-        await pool.query<Pick<FileRow, "id" | "storage_key" | "mime_type">>(
-          "SELECT id,storage_key,mime_type FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
-          [job.user_id, ids]
-        )
-      ).rows
-    : [];
+  const references = ids.length
+    ? await pool.query<Pick<FileRow, "id" | "storage_key" | "mime_type">>(
+        "SELECT id,storage_key,mime_type FROM syntx_files WHERE user_id=$1 AND id=ANY($2::text[])",
+        [job.user_id, ids]
+      )
+    : { rows: [] };
+  const { rows } = references;
   const dataById = new Map<string, string>();
   for (const row of rows) {
     const queryResult2 = await readMedia(row.storage_key);
@@ -229,6 +220,7 @@ const submit = async (job: Job) => {
       input_references: references.input.length ? references.input : undefined,
       model: modelId,
       n: settings.n,
+      negative_prompt: settings.negativePrompt,
       output_format: settings.outputFormat,
       prompt,
       quality: settings.quality,
@@ -341,22 +333,14 @@ const runMaintenance = async () => {
     await pool.query(
       "DELETE FROM syntx_worker_heartbeats WHERE updated_at<now()-interval '1 day'"
     );
-    const stuck = await pool.query<{ id: string }>(
-      "SELECT id FROM syntx_jobs WHERE (status='reconciling' OR status='submitting') AND provider_id IS NULL AND settled_at IS NULL AND created_at < now() - interval '5 minutes'"
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        error:
+          error instanceof Error ? error.message : "Unknown maintenance error",
+        event: "worker.maintenance_failed",
+      })
     );
-    for (const s of stuck.rows) {
-      try {
-        await settleJob({
-          jobId: s.id,
-          reason: "Запрос не подтверждён провайдером; резерв возвращён",
-          status: "failed",
-        });
-      } catch {
-        // ignore
-      }
-    }
-  } catch {
-    console.error(JSON.stringify({ event: "worker.maintenance_failed" }));
   }
 };
 
@@ -373,16 +357,13 @@ const refreshCatalogIfNeeded = async () => {
 };
 
 const handleJobError = async (job: Job, error: Error) => {
-  const isRouterAI =
-    error instanceof RouterAIError || (error as any)?.name === "RouterAIError";
-  const isApi =
-    error instanceof ApiError || (error as any)?.name === "ApiError";
-  const isUncertain = isRouterAI && Boolean((error as any).uncertain);
+  const providerError = error instanceof RouterAIError ? error : undefined;
+  const isApi = error instanceof ApiError;
+  const isUncertain = Boolean(providerError?.uncertain);
 
   if (
     job.status === "queued" ||
-    ((isRouterAI || isApi) && !isUncertain && job.status === "submitting") ||
-    (isRouterAI && (error as any).status === 404 && job.status === "running")
+    ((providerError || isApi) && !isUncertain && job.status === "submitting")
   ) {
     await settleJob({
       jobId: job.id,
@@ -391,12 +372,13 @@ const handleJobError = async (job: Job, error: Error) => {
       status: "failed",
     });
   } else if (job.status === "submitting") {
-    await markReconciling(job);
+    await markReconciling(job, providerError?.context);
   } else if (job.status === "running" || job.status === "persisting") {
     // GET/download/storage retries are safe. A reservation never expires with a browser timeout.
     const exhausted =
       job.attempts > 500 ||
-      Date.now() - new Date(toIsoDate(job.created_at)).getTime() > 7 * 24 * 60 * 60_000;
+      Date.now() - new Date(toIsoDate(job.created_at)).getTime() >
+        7 * 24 * 60 * 60_000;
     await (exhausted ? markReconciling(job) : retryLater(job));
   } else {
     throw error;

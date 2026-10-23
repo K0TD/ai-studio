@@ -1572,15 +1572,14 @@ export const isBudgetModel = (
   if (!modelOrId) {
     return false;
   }
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- This internal helper accepts a typed model identifier or already validated catalog metadata; no external payload is parsed here.
   const id = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
   return BUDGET_MODEL_IDS.includes(id);
 };
 
 export const isVipModel = (
   modelOrId?: ModelMetadata | { id: string } | string | null
-): boolean => {
-  return !isBudgetModel(modelOrId);
-};
+): boolean => !isBudgetModel(modelOrId);
 
 export const getFamilyModels = (family: ModelFamily): ModelMetadata[] =>
   family.models.map((m) => ({
@@ -1589,9 +1588,9 @@ export const getFamilyModels = (family: ModelFamily): ModelMetadata[] =>
     tier: isBudgetModel(m.id) ? "budget" : "vip",
   }));
 
-export const getBudgetModelsForFamily = (family: ModelFamily): ModelMetadata[] =>
-  family.models.filter((m) => isBudgetModel(m.id));
+export const getBudgetModelsForFamily = (
+  family: ModelFamily
+): ModelMetadata[] => family.models.filter((m) => isBudgetModel(m.id));
 
 export const getVipModelsForFamily = (family: ModelFamily): ModelMetadata[] =>
   family.models.filter((m) => !isBudgetModel(m.id));
-

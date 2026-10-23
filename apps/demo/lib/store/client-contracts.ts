@@ -55,31 +55,8 @@ export const clientCatalogSchema = z.object({
   video: z.array(clientModelSchema).max(1000),
 });
 
-export const safeRubSchema = z.preprocess((val) => {
-  if (typeof val === "number") return val.toFixed(2);
-  if (typeof val === "string") {
-    const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
-    if (match) {
-      const whole = match[2];
-      const dec = (match[3] ?? "").padEnd(2, "0");
-      return `${match[1] ?? ""}${whole}.${dec}`;
-    }
-  }
-  return val;
-}, rubSchema);
-
-export const safeSignedRubSchema = z.preprocess((val) => {
-  if (typeof val === "number") return val.toFixed(2);
-  if (typeof val === "string") {
-    const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
-    if (match) {
-      const whole = match[2];
-      const dec = (match[3] ?? "").padEnd(2, "0");
-      return `${match[1] ?? ""}${whole}.${dec}`;
-    }
-  }
-  return val;
-}, signedRubSchema);
+export const safeRubSchema = rubSchema;
+export const safeSignedRubSchema = signedRubSchema;
 
 export const studioUserSchema = z.object({
   availableRub: safeSignedRubSchema,

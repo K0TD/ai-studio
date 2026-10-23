@@ -142,17 +142,21 @@ const supportedVoices = (id: string): string[] | undefined => {
   return undefined;
 };
 const catalogCapabilities = (raw: ProviderModel) => ({
-  maxImageCount: Math.min(4, raw.max_image_count ?? 1),
+  maxImageCount: raw.id.startsWith("google/gemini-")
+    ? 1
+    : Math.min(4, raw.max_image_count ?? 1),
   supportedAspectRatios: raw.supported_aspect_ratios,
-  supportedBackgrounds: raw.supported_backgrounds ?? ["auto"],
+  supportedBackgrounds: raw.id.startsWith("google/gemini-")
+    ? ["auto"]
+    : (raw.supported_backgrounds ?? ["auto"]),
   supportedDurations: raw.supported_durations,
   supportedFrameImages: raw.supported_frame_images ?? [],
-  supportedOutputFormats: raw.supported_output_formats ?? [
-    "png",
-    "jpeg",
-    "webp",
-  ],
-  supportedQualities: raw.supported_qualities ?? ["auto"],
+  supportedOutputFormats: raw.id.startsWith("google/gemini-")
+    ? ["png"]
+    : (raw.supported_output_formats ?? ["png", "jpeg", "webp"]),
+  supportedQualities: raw.id.startsWith("google/gemini-")
+    ? ["auto"]
+    : (raw.supported_qualities ?? ["auto"]),
   supportedResolutions: raw.supported_resolutions ?? raw.supported_image_sizes,
   supportsAudio: raw.generate_audio === true,
   supportsNegativePrompt:
@@ -161,7 +165,9 @@ const catalogCapabilities = (raw: ProviderModel) => ({
   supportsReferences: Boolean(
     raw.supported_image_references || raw.supports_reference_images
   ),
-  supportsSeed: raw.seed === true || raw.image_seed === true,
+  supportsSeed:
+    !raw.id.startsWith("google/gemini-") &&
+    (raw.seed === true || raw.image_seed === true),
 });
 const catalogBasePrice = (raw: ProviderModel) =>
   Number(
@@ -263,7 +269,8 @@ export const catalogModels = async (
   const stale =
     !rows.length ||
     rows.some(
-      (r) => Date.now() - new Date(toIsoDate(r.verified_at)).getTime() > MAX_AGE_MS
+      (r) =>
+        Date.now() - new Date(toIsoDate(r.verified_at)).getTime() > MAX_AGE_MS
     );
   if (stale && refresh) {
     try {
@@ -283,7 +290,10 @@ export const catalogModels = async (
       row && !row.data.unavailable ? row.data : undefined,
       row ? toIsoDate(row.verified_at) : null
     );
-    if (!row || Date.now() - new Date(toIsoDate(row.verified_at)).getTime() > MAX_AGE_MS) {
+    if (
+      !row ||
+      Date.now() - new Date(toIsoDate(row.verified_at)).getTime() > MAX_AGE_MS
+    ) {
       model.enabled = false;
       model.disabledReason = "catalog_stale";
     }
@@ -373,9 +383,15 @@ export const estimate = (
       prices.find(
         (p) => p.variant?.toLowerCase() === settings.resolution?.toLowerCase()
       ) ??
-      prices.find((p) => p.variant === null) ??
-      prices[0];
-    const unitPrice = rate ? Number(rate.price) : model.basePriceRub;
+      prices.find((p) => p.variant === null);
+    if (!rate) {
+      throw new ApiError(
+        422,
+        "Нет подтверждённого тарифа для выбранных параметров",
+        "UNSUPPORTED_PRICING"
+      );
+    }
+    const unitPrice = Number(rate.price);
     amount = unitPrice * (settings.n ?? 1);
   }
   return costRub(Math.max(0.01, Math.ceil(amount * 100) / 100));

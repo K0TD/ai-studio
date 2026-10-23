@@ -55,7 +55,7 @@ export const adminRowSchema = z.object({
   type: z.string().max(160).optional(),
   userId: identifier.optional(),
   userName: z.string().max(500).optional(),
-  varianceRub: signedRubSchema.optional(),
+  varianceRub: signedRubSchema.nullable().optional(),
 });
 export const statsSchema = z.object({
   activeGenerations: z.number().int().nonnegative(),

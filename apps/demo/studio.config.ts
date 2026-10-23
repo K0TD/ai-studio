@@ -186,6 +186,9 @@ export const studioConfig: StudioConfig = {
   branding: {
     siteName: "2.71",
   },
+  // SAFETY: Studio uses schema-independent NodePgDatabase builders and passes
+  // its tables explicitly; only the unused relational schema generic differs.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Drizzle makes its schema generic invariant; DbClient intentionally erases it without changing the configured database provider.
   db: studioDb as unknown as DbClient,
   models: [krea2],
   moderation: allowAllModeration,

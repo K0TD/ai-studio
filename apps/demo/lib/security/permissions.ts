@@ -1,17 +1,21 @@
 import { z } from "zod";
 export const roleSchema = z.enum(["user", "vip", "admin"]);
 export const sectionSchema = z.enum(["video", "image", "audio"]);
-const normalizeRubString = (val: unknown) => {
-  if (typeof val === "number") return val.toFixed(2);
-  if (typeof val === "string") {
-    const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(val);
-    if (match) {
-      const whole = match[2];
-      const dec = (match[3] ?? "").padEnd(2, "0");
-      return `${match[1] ?? ""}${whole}.${dec}`;
-    }
+const decimalInputSchema = z.union([
+  z.number().transform((value) => value.toFixed(2)),
+  z.string(),
+]);
+const normalizeRubString: Parameters<typeof z.preprocess>[0] = (value) => {
+  const parsed = decimalInputSchema.safeParse(value);
+  if (!parsed.success) {
+    return value;
   }
-  return val;
+  const match = /^(-?)(0|[1-9]\d{0,9})(?:\.(\d{1,2}))?$/u.exec(parsed.data);
+  if (match) {
+    const [, sign, whole, decimals = ""] = match;
+    return `${sign}${whole}.${decimals.padEnd(2, "0")}`;
+  }
+  return parsed.data;
 };
 
 export const rubSchema = z.preprocess(
@@ -54,4 +58,3 @@ export const CLOSED_PERMISSIONS: UserPermissions = {
   modelIds: [],
   sections: [],
 };
-

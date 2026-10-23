@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { costRub, parseRub, formatKopecks } from "@/lib/billing/money";
 import { pool } from "@/lib/db";
+import { toIsoDate } from "@/lib/db/date";
 import { ApiError } from "@/lib/security/http";
 
 import type { JobRow, WalletRow } from "./rows";
@@ -108,7 +109,8 @@ const verifySettlementState = (input: Settlement, job: JobRow) => {
   if (
     input.manual &&
     (job.status !== "reconciling" ||
-      (job.leased_until && new Date(job.leased_until).getTime() > Date.now()))
+      (job.leased_until &&
+        new Date(toIsoDate(job.leased_until)).getTime() > Date.now()))
   ) {
     throw new ApiError(409, "Задание не готово для ручной сверки");
   }
@@ -259,8 +261,8 @@ export const reconcileJob = async (input: {
     providerCost: input.action === "release" ? "0.00" : input.costRub,
     reason:
       input.action === "settle" && !hasResult
-        ? `${input.reason ? input.reason + ". " : ""}Финансовая сверка завершена; результат не удалось восстановить.`
-        : (input.reason || "Ручная сверка задания"),
+        ? `${input.reason ? `${input.reason}. ` : ""}Финансовая сверка завершена; результат не удалось восстановить.`
+        : input.reason || "Ручная сверка задания",
     status: completed ? "completed" : "failed",
   });
 };

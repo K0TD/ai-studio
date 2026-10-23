@@ -41,6 +41,7 @@ export interface SystemStats {
 export interface AdminAuditDetails {
   role?: UserRole;
   permissions?: UserPermissions;
+  permissionsUpdated?: boolean;
   sessionsRevoked?: boolean;
   transactionId?: string;
   amountRub?: string;

@@ -1,4 +1,7 @@
 import { validateRuntimeEnv } from "../lib/env";
+import { initLogging } from "../lib/logging";
+
+initLogging("startup");
 
 try {
   validateRuntimeEnv();

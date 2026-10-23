@@ -4,7 +4,13 @@ import { hashPassword } from "better-auth/crypto";
 import { and, eq, gt } from "drizzle-orm";
 
 import { db, isPostgres } from "../db";
-import { account, adminAudit, invitation, session, user } from "../db/active-schema";
+import {
+  account,
+  adminAudit,
+  invitation,
+  session,
+  user,
+} from "../db/active-schema";
 import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import { lockAdminUsers } from "./authorization";
@@ -15,8 +21,8 @@ export const createInvitation = async (
   userId: string
 ): Promise<string> => {
   const token = randomBytes(32).toString("base64url");
-  await (tx as any).delete(invitation).where(eq(invitation.userId, userId));
-  await (tx as any).insert(invitation).values({
+  await tx.delete(invitation).where(eq(invitation.userId, userId));
+  await tx.insert(invitation).values({
     expiresAt: new Date(Date.now() + 86_400_000),
     id: crypto.randomUUID(),
     tokenHash: tokenDigest(token),
@@ -67,7 +73,7 @@ export const activateAccount = async (
       .from(user)
       .where(eq(user.id, candidate.userId));
     const [target] = isPostgres
-      ? await (targetQuery as any).for("update")
+      ? await targetQuery.for("update")
       : await targetQuery;
 
     const validQuery = tx
@@ -80,7 +86,7 @@ export const activateAccount = async (
         )
       );
     const [valid] = isPostgres
-      ? await (validQuery as any).for("update")
+      ? await validQuery.for("update")
       : await validQuery;
     if (!valid || !target || target.isBanned || target.isEnvAdmin) {
       throw new ApiError(400, "Ссылка недействительна или истекла");

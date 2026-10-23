@@ -1,13 +1,12 @@
-import { count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { count, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, pool } from "../db";
+import { db, pool, sumRubSql } from "../db";
 import { adminAudit, session, transactions, user } from "../db/active-schema";
 import { toIsoDate } from "../db/date";
 import type { DatabaseTransaction } from "../db/transaction";
 import { ApiError } from "../security/errors";
 import {
-  CLOSED_PERMISSIONS,
   DEFAULT_ADMIN_PERMISSIONS,
   DEFAULT_USER_PERMISSIONS,
   DEFAULT_VIP_PERMISSIONS,
@@ -44,11 +43,11 @@ export const AdminService = {
         const id = crypto.randomUUID();
         const effectivePermissions =
           params.permissions ??
-          (params.role === "admin"
-            ? DEFAULT_ADMIN_PERMISSIONS
-            : params.role === "vip"
-            ? DEFAULT_VIP_PERMISSIONS
-            : DEFAULT_USER_PERMISSIONS);
+          {
+            admin: DEFAULT_ADMIN_PERMISSIONS,
+            user: DEFAULT_USER_PERMISSIONS,
+            vip: DEFAULT_VIP_PERMISSIONS,
+          }[params.role];
         const [created] = await tx
           .insert(user)
           .values({
@@ -91,7 +90,9 @@ export const AdminService = {
       const isSqliteDuplicate =
         error instanceof Error &&
         (error.message.includes("UNIQUE constraint failed") ||
-          (error as any).code === "SQLITE_CONSTRAINT_UNIQUE");
+          z
+            .object({ code: z.literal("SQLITE_CONSTRAINT_UNIQUE") })
+            .safeParse(error).success);
       if (duplicate.success || isSqliteDuplicate) {
         throw new ApiError(409, "Учетная запись уже существует");
       }
@@ -107,7 +108,7 @@ export const AdminService = {
       .offset((query.page - 1) * query.limit);
     const [aggregate] = await db.select({ total: count() }).from(adminAudit);
     return {
-      events: events.map((e: any) => ({
+      events: events.map((e) => ({
         ...e,
         createdAt: toIsoDate(e.createdAt),
       })),
@@ -117,10 +118,10 @@ export const AdminService = {
     };
   },
   async getStats(): Promise<SystemStats> {
-    const totals = await pool.query<any>(`select
+    const totals = await pool.query<SystemStats>(`select
       (select cast(count(*) as integer) from "user") as "totalUsers",
-      (select cast(coalesce(sum(balance_rub),0) as text) from "user") as "totalBalanceRub",
-      (select cast(coalesce(-sum(amount_rub),0) as text) from transactions where type='generation_cost'
+      (select ${sumRubSql("balance_rub")} from "user") as "totalBalanceRub",
+      (select ${sumRubSql("amount_rub", true)} from transactions where type='generation_cost'
         and created_at >= date_trunc('day', now() at time zone 'Europe/Moscow') at time zone 'Europe/Moscow') as "totalSpentTodayRub",
       (select cast(count(*) as integer) from syntx_jobs where settled_at is null) as "activeGenerations",
       (select cast(count(*) as integer) from syntx_catalog) as "supportedModelsCount",
@@ -131,8 +132,12 @@ export const AdminService = {
       activeGenerations: Number(raw.activeGenerations ?? 0),
       routerAiStatus: raw.routerAiStatus ?? "down",
       supportedModelsCount: Number(raw.supportedModelsCount ?? 0),
-      totalBalanceRub: formatKopecks(parseRub(String(raw.totalBalanceRub ?? "0.00"))),
-      totalSpentTodayRub: formatKopecks(parseRub(String(raw.totalSpentTodayRub ?? "0.00"))),
+      totalBalanceRub: formatKopecks(
+        parseRub(String(raw.totalBalanceRub ?? "0.00"))
+      ),
+      totalSpentTodayRub: formatKopecks(
+        parseRub(String(raw.totalSpentTodayRub ?? "0.00"))
+      ),
       totalUsers: Number(raw.totalUsers ?? 0),
     };
   },
@@ -160,7 +165,7 @@ export const AdminService = {
       limit: query.limit,
       page: query.page,
       total: aggregate.total,
-      transactions: rows.map((row: any) => ({
+      transactions: rows.map((row) => ({
         ...row.transaction,
         createdAt: toIsoDate(row.transaction.createdAt),
         userName: row.userName,
@@ -174,9 +179,9 @@ export const AdminService = {
     );
     const filter = needle
       ? or(
-          ilike(user.name, `%${needle}%`),
-          ilike(user.email, `%${needle}%`),
-          ilike(user.id, `%${needle}%`)
+          sql`lower(${user.name}) LIKE lower(${`%${needle}%`}) ESCAPE '\\'`,
+          sql`lower(${user.email}) LIKE lower(${`%${needle}%`}) ESCAPE '\\'`,
+          sql`lower(${user.id}) LIKE lower(${`%${needle}%`}) ESCAPE '\\'`
         )
       : undefined;
     const rows = await db
@@ -198,7 +203,7 @@ export const AdminService = {
       page: query.page,
       stats: await this.getStats(),
       total: aggregate.total,
-      users: rows.map((row: any) => ({
+      users: rows.map((row) => ({
         ...userView(row.account),
         totalGenerations: row.totalGenerations,
       })),

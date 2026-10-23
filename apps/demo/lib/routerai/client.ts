@@ -1,6 +1,7 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import { RouterAIError } from "./error";
+import type { ProviderFailureContext } from "./error";
 import {
   videoResponseSchema,
   imageResponseSchema,
@@ -8,6 +9,7 @@ import {
   uploadResponseSchema,
   geminiImageUrls,
   nativeImageUrls,
+  usageSchema,
 } from "./responses";
 import type { ProviderModel } from "./responses";
 import type {
@@ -73,6 +75,53 @@ export interface ProviderOutput {
   generationId?: string;
 }
 
+const providerEnvelopeSchema = z.looseObject({
+  id: z.string().max(300).optional(),
+});
+type ProviderEnvelope = z.infer<typeof providerEnvelopeSchema>;
+const finishReasonsSchema = z.array(
+  z.looseObject({
+    finish_reason: z
+      .string()
+      .regex(/^[a-z_]{1,40}$/u)
+      .nullish(),
+  })
+);
+
+// Keep only bounded metadata. Provider bodies may contain private prompts,
+// signed download URLs and many megabytes of base64 image data.
+const responseContext = (
+  response: Response,
+  endpoint: string,
+  body?: ProviderEnvelope
+): ProviderFailureContext => {
+  const usage = usageSchema.safeParse(body?.usage);
+  const choices = finishReasonsSchema.safeParse(body?.choices);
+  return {
+    cost: usage.success ? usage.data?.cost : undefined,
+    diagnostic: {
+      endpoint,
+      finishReasons: choices.success
+        ? choices.data
+            .flatMap((choice) =>
+              choice.finish_reason ? [choice.finish_reason] : []
+            )
+            .slice(0, 4)
+        : undefined,
+      responseKeys: body
+        ? Object.keys(body)
+            .filter((key) => /^[a-z_]{1,40}$/u.test(key))
+            .slice(0, 20)
+        : undefined,
+      status: response.status,
+    },
+    generationId: (response.headers.get("x-generation-id") ?? body?.id)?.slice(
+      0,
+      300
+    ),
+  };
+};
+
 export class RouterAIClient {
   private explicitApiKey?: string;
   constructor(explicitApiKey?: string) {
@@ -115,29 +164,27 @@ export class RouterAIClient {
       );
     }
     if (!response.ok) {
-      let details: string | undefined;
+      let body: ProviderEnvelope | undefined;
       try {
-        const text = await response.text();
-        try {
-          const json = JSON.parse(text);
-          details = json?.error?.message || json?.error || json?.message || text.slice(0, 300);
-        } catch {
-          details = text.slice(0, 300);
-        }
+        const bytes = await limitedBody(response, 65_536);
+        body = providerEnvelopeSchema.parse(
+          JSON.parse(bytes.toString("utf-8"))
+        );
       } catch {
-        // failed to read body
+        // An error body is diagnostic only; never expose it to the client.
       }
-      const isServerOrTimeout = response.status >= 500 || response.status === 408;
-      const message = details
-        ? `Провайдер отклонил запрос (${response.status}): ${details}`
-        : response.status === 429
+      const isServerOrTimeout =
+        response.status >= 500 || response.status === 408;
+      const message =
+        response.status === 429
           ? "Провайдер временно ограничил запросы"
           : `Провайдер отклонил запрос генерации (${response.status})`;
       throw new RouterAIError(
         message,
         response.status,
-        details,
-        init.method === "POST" && isServerOrTimeout
+        undefined,
+        init.method === "POST" && isServerOrTimeout,
+        responseContext(response, path, body)
       );
     }
     return response;
@@ -148,19 +195,28 @@ export class RouterAIClient {
     init: RequestInit = {}
   ): Promise<T> {
     const response = await this.request(path, init);
+    let body: ProviderEnvelope | undefined;
     try {
       const queryResult1 = await limitedBody(response);
-      return schema.parse(JSON.parse(queryResult1.toString("utf-8")));
+      body = providerEnvelopeSchema.parse(
+        JSON.parse(queryResult1.toString("utf-8"))
+      );
+      return schema.parse({
+        ...body,
+        id: body.id ?? response.headers.get("x-generation-id") ?? undefined,
+      });
     } catch (error) {
       if (error instanceof RouterAIError) {
+        error.context = responseContext(response, path, body);
+        error.uncertain = init.method === "POST";
         throw error;
       }
-      const details = error instanceof Error ? error.message : String(error);
       throw new RouterAIError(
-        `Некорректный ответ провайдера: ${details}`,
+        "Некорректный ответ провайдера; требуется сверка задания",
         502,
-        details,
-        init.method === "POST"
+        undefined,
+        init.method === "POST",
+        responseContext(response, path, body)
       );
     }
   }
@@ -215,12 +271,26 @@ export class RouterAIClient {
     const urls = gemini
       ? geminiImageUrls(result)
       : nativeImageUrls(result, request.output_format);
-    if (!urls.length) {
+    if (!urls.length || urls.length > 4) {
       throw new RouterAIError(
         "Провайдер не вернул изображения; требуется сверка задания",
         502,
         undefined,
-        true
+        true,
+        {
+          cost: result.usage?.cost,
+          diagnostic: {
+            endpoint: gemini ? "/chat/completions" : "/images",
+            finishReasons: result.choices?.flatMap((choice) =>
+              choice.finish_reason &&
+              /^[a-z_]{1,40}$/u.test(choice.finish_reason)
+                ? [choice.finish_reason]
+                : []
+            ),
+            status: 200,
+          },
+          generationId: result.id,
+        }
       );
     }
     return { cost: result.usage?.cost, generationId: result.id, urls };
@@ -232,6 +302,7 @@ export class RouterAIClient {
       body: JSON.stringify(request),
       method: "POST",
     });
+    const context = responseContext(response, "/audio/speech");
     const mime = response.headers.get("content-type")?.split(";")[0];
     if (!mime?.startsWith("audio/")) {
       await response.body?.cancel();
@@ -239,16 +310,33 @@ export class RouterAIClient {
         "Провайдер не вернул аудио",
         502,
         undefined,
-        true
+        true,
+        context
       );
     }
-    const bytes = await limitedBody(response);
+    let bytes: Buffer;
+    try {
+      bytes = await limitedBody(response);
+    } catch (error) {
+      if (error instanceof RouterAIError) {
+        error.context = context;
+        throw error;
+      }
+      throw new RouterAIError(
+        "Не удалось прочитать аудио провайдера",
+        502,
+        undefined,
+        true,
+        context
+      );
+    }
     if (!bytes.length) {
       throw new RouterAIError(
         "Провайдер вернул пустое аудио",
         502,
         undefined,
-        true
+        true,
+        context
       );
     }
     return {

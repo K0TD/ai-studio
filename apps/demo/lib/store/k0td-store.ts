@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import type { z } from "zod";
 import { create } from "zustand";
 
+import { isBudgetModel } from "../routerai/models-catalog";
 import type {
   GenerationItem,
   SyntxTab,
@@ -17,7 +18,6 @@ import {
   jobsResponseSchema,
   okResponseSchema,
 } from "./client-contracts";
-import { isBudgetModel } from "../routerai/models-catalog";
 import { modelAllowed, sectionAllowed } from "./client-policy";
 export type K0tdTab = SyntxTab;
 export interface AvatarProfile {
@@ -228,14 +228,24 @@ const server = async <T>(
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401) {
-      window.location.assign("/login");
+      globalThis.window?.location.assign("/login");
     }
     const error = apiErrorSchema.safeParse(data);
-    throw new Error(
-      error.success ? error.data.error : `Ошибка ${response.status}`
+    throw Object.assign(
+      new Error(error.success ? error.data.error : `Ошибка ${response.status}`),
+      { status: response.status }
     );
   }
   return schema.parse(data);
+};
+const handleRefreshFailure = (
+  error: Error,
+  clearSession: () => void
+): string => {
+  if ("status" in error && [401, 403].includes(Number(error.status))) {
+    clearSession();
+  }
+  return error.message;
 };
 const runChatAction = async (operation: () => Promise<void>) => {
   try {
@@ -247,47 +257,60 @@ const runChatAction = async (operation: () => Promise<void>) => {
 const videoOptions = (
   previous: VideoSettings,
   model?: ModelMetadata
-): VideoSettings => ({
-  ...previous,
-  aspectRatio: model?.supportedAspectRatios?.includes(previous.aspectRatio)
-    ? previous.aspectRatio
-    : "Auto",
-  duration: model?.supportedDurations?.includes(previous.duration)
-    ? previous.duration
-    : (model?.supportedDurations?.[0] ?? 5),
-  modelId: model?.id ?? "",
-  resolution: model?.supportedResolutions?.includes(previous.resolution)
-    ? previous.resolution
-    : (model?.supportedResolutions?.[0] ?? ""),
-});
+): VideoSettings =>
+  previous.modelId && !model
+    ? previous
+    : {
+        ...previous,
+        aspectRatio: model?.supportedAspectRatios?.includes(
+          previous.aspectRatio
+        )
+          ? previous.aspectRatio
+          : "Auto",
+        duration: model?.supportedDurations?.includes(previous.duration)
+          ? previous.duration
+          : (model?.supportedDurations?.[0] ?? 5),
+        modelId: model?.id ?? "",
+        resolution: model?.supportedResolutions?.includes(previous.resolution)
+          ? previous.resolution
+          : (model?.supportedResolutions?.[0] ?? ""),
+      };
 const imageOptions = (
   previous: ImageSettings,
   model?: ModelMetadata
-): ImageSettings => ({
-  ...previous,
-  aspectRatio: model?.supportedAspectRatios?.includes(previous.aspectRatio)
-    ? previous.aspectRatio
-    : "auto",
-  modelId: model?.id ?? "",
-  n: Math.min(previous.n, model?.maxImageCount ?? 1),
-  quality: model?.supportedQualities?.includes(previous.quality)
-    ? previous.quality
-    : "auto",
-  resolution: model?.supportedResolutions?.includes(previous.resolution)
-    ? previous.resolution
-    : (model?.supportedResolutions?.[0] ?? "1K"),
-});
+): ImageSettings =>
+  previous.modelId && !model
+    ? previous
+    : {
+        ...previous,
+        aspectRatio: model?.supportedAspectRatios?.includes(
+          previous.aspectRatio
+        )
+          ? previous.aspectRatio
+          : "auto",
+        modelId: model?.id ?? "",
+        n: Math.min(previous.n, model?.maxImageCount ?? 1),
+        quality: model?.supportedQualities?.includes(previous.quality)
+          ? previous.quality
+          : "auto",
+        resolution: model?.supportedResolutions?.includes(previous.resolution)
+          ? previous.resolution
+          : (model?.supportedResolutions?.[0] ?? "1K"),
+      };
 const audioOptions = (
   previous: AudioSettings,
   model?: ModelMetadata
-): AudioSettings => ({
-  ...previous,
-  mode: "elevenlabs",
-  modelId: model?.id ?? "",
-  voiceId: model?.supportedVoices?.includes(previous.voiceId)
-    ? previous.voiceId
-    : (model?.supportedVoices?.[0] ?? "eve"),
-});
+): AudioSettings =>
+  previous.modelId && !model
+    ? previous
+    : {
+        ...previous,
+        mode: "elevenlabs",
+        modelId: model?.id ?? "",
+        voiceId: model?.supportedVoices?.includes(previous.voiceId)
+          ? previous.voiceId
+          : (model?.supportedVoices?.[0] ?? "eve"),
+      };
 const activeSection = (previous: K0tdTab, account: StudioUser): K0tdTab => {
   if (
     !["video", "image", "audio"].includes(previous) ||
@@ -309,16 +332,16 @@ const catalogView = (catalog: ClientCatalog, account: StudioUser) => {
         (model) =>
           !model.available || !model.enabled || !modelAllowed(account, model)
       )
-      .map((model) => ({
-        ...model,
-        disabledReason: !modelAllowed(account, model)
-          ? account?.role !== "vip" &&
-            account?.role !== "admin" &&
-            !isBudgetModel(model)
-            ? "vip_required"
-            : "access_not_granted"
-          : model.disabledReason,
-      })),
+      .map((model) => {
+        let { disabledReason } = model;
+        if (!modelAllowed(account, model)) {
+          disabledReason = "access_not_granted";
+          if (account.role === "user" && !isBudgetModel(model)) {
+            disabledReason = "vip_required";
+          }
+        }
+        return { ...model, disabledReason };
+      }),
   };
 };
 const findSelectedModel = (
@@ -326,8 +349,9 @@ const findSelectedModel = (
   id: string,
   category: "video" | "image" | "audio"
 ) =>
-  models.find((model) => model.id === id && model.category === category) ??
-  models.find((model) => model.category === category);
+  id
+    ? models.find((model) => model.id === id && model.category === category)
+    : models.find((model) => model.category === category);
 export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
   activeChatId: "",
   activeTab: "video",
@@ -400,14 +424,18 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
       });
       set((state) => {
         const chats = state.chats.filter((candidate) => candidate.id !== id);
+        const nextChat = chats.find((chat) => chat.tab === state.activeTab);
         return {
           activeChatId:
             state.activeChatId === id
-              ? (chats[0]?.id ?? "")
+              ? (nextChat?.id ?? "")
               : state.activeChatId,
           chats,
           history: state.history.filter((item) => item.chatId !== id),
-          prompt: state.activeChatId === id ? "" : state.prompt,
+          prompt:
+            state.activeChatId === id
+              ? (nextChat?.draftPrompt ?? "")
+              : state.prompt,
         };
       });
     }),
@@ -538,20 +566,9 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
       if (revision !== refreshRevision) {
         return;
       }
-      sessionRevision += 1;
-      set({
-        activeChatId: "",
-        balanceRub: 0,
-        chats: [],
-        history: [],
-        historyCursor: null,
-        models: [],
-        prompt: "",
-        serverError:
-          error instanceof Error ? error.message : "Сервис недоступен",
-        serverReady: false,
-        user: null,
-      });
+      const failure =
+        error instanceof Error ? error : new Error("Сервис недоступен");
+      set({ serverError: handleRefreshFailure(failure, get().clearSession) });
     }
   },
   renameChat: (id, title) =>

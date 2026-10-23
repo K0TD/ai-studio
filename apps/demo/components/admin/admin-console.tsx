@@ -1,5 +1,13 @@
 "use client";
-import { Plus, RefreshCw, Search, Shield, Users, Wallet, X } from "lucide-react";
+import {
+  Plus,
+  RefreshCw,
+  Search,
+  Shield,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -150,13 +158,13 @@ const PermissionFields = ({
 
   const selectAllFiltered = () => {
     const toAdd = filteredModels.map((m) => m.id);
-    const combined = Array.from(new Set([...value.modelIds, ...toAdd]));
+    const combined = [...new Set([...value.modelIds, ...toAdd])];
     onChange({ ...value, modelIds: combined });
   };
 
   const selectAllVip = () => {
     const vipIds = models.filter((m) => !isBudgetModel(m.id)).map((m) => m.id);
-    const combined = Array.from(new Set([...value.modelIds, ...vipIds]));
+    const combined = [...new Set([...value.modelIds, ...vipIds])];
     onChange({ ...value, modelIds: combined });
   };
 
@@ -166,27 +174,36 @@ const PermissionFields = ({
 
   return (
     <fieldset className="grid gap-4 rounded-2xl border p-4">
-      <legend className="px-2 text-sm font-semibold">Разрешения и доступ</legend>
+      <legend className="px-2 text-sm font-semibold">
+        Разрешения и доступ
+      </legend>
 
       {role === "admin" && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-relaxed text-red-700 dark:text-red-300">
-          🛡️ <strong>Роль Администратор:</strong> полный неограниченный доступ ко ВСЕМ разделам, моделям и функциям системы.
+          🛡️ <strong>Роль Администратор:</strong> полный неограниченный доступ
+          ко ВСЕМ разделам, моделям и функциям системы.
         </div>
       )}
       {role === "vip" && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-          👑 <strong>Роль VIP:</strong> по умолчанию пользователю открыты ВСЕ модели каталога во всех разделах.
+          👑 <strong>Роль VIP:</strong> по умолчанию пользователю открыты ВСЕ
+          модели каталога во всех разделах.
         </div>
       )}
       {role === "user" && (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs leading-relaxed text-emerald-700 dark:text-emerald-300">
-          ✨ <strong>Пользователь (базовый):</strong> по умолчанию открыты все бюджетные модели. Выбор моделей ниже дает дополнительный доступ к выбранным VIP-моделям.
+          ✨ <strong>Пользователь (базовый):</strong> по умолчанию открыты все
+          бюджетные модели. Выбор моделей ниже дает дополнительный доступ к
+          выбранным VIP-моделям.
         </div>
       )}
 
       <div className="flex flex-wrap gap-4">
         {(["video", "image", "audio"] as const).map((section) => (
-          <label key={section} className="flex items-center gap-2 text-sm cursor-pointer font-medium">
+          <label
+            key={section}
+            className="flex items-center gap-2 text-sm cursor-pointer font-medium"
+          >
             <input
               type="checkbox"
               className="rounded border-border accent-[#f05138]"
@@ -211,7 +228,9 @@ const PermissionFields = ({
             Дополнительно разрешенные VIP-модели
           </span>
           <span className="text-xs text-muted-foreground">
-            Выбрано: <strong className="text-foreground">{value.modelIds.length}</strong> из {models.length}
+            Выбрано:{" "}
+            <strong className="text-foreground">{value.modelIds.length}</strong>{" "}
+            из {models.length}
           </span>
         </div>
 
@@ -316,7 +335,9 @@ const PermissionFields = ({
         </div>
 
         <span className="text-xs text-muted-foreground">
-          Для обычных пользователей бюджетные модели активны всегда. Выбор моделей здесь добавляет доступ к премиум-моделям. Для VIP и администратора все модели доступны по умолчанию.
+          Для обычных пользователей бюджетные модели активны всегда. Выбор
+          моделей здесь добавляет доступ к премиум-моделям. Для VIP и
+          администратора все модели доступны по умолчанию.
         </span>
       </div>
 

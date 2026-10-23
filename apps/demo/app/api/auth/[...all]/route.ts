@@ -10,6 +10,7 @@ import {
   rateLimit,
   requireUser,
 } from "@/lib/security/http";
+import { readRequestText } from "@/lib/security/request";
 
 export const GET = apiRoute(async (request) => {
   if (!["/get-session", "/list-sessions"].includes(authRequestPath(request))) {
@@ -32,16 +33,16 @@ export const POST = apiRoute(async (request) => {
       );
     }
   }
-  const bodyText = await request.text();
+  const bodyText = await readRequestText(request);
   const requestForValidation = new Request(request.url, {
-    method: request.method,
-    headers: request.headers,
     body: bodyText,
+    headers: request.headers,
+    method: request.method,
   });
   const requestForHandler = new Request(request.url, {
-    method: request.method,
-    headers: request.headers,
     body: bodyText,
+    headers: request.headers,
+    method: request.method,
   });
 
   await validateAuthRequest(requestForValidation);
