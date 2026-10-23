@@ -145,8 +145,10 @@ const fixtureJob = {
   modelId: fixtureModel.id,
   outputUrls: [],
   prompt: "Сохраненный промпт",
+  stage: "running" as const,
   status: "pending" as const,
   tab: "video" as const,
+  updatedAt: createdAt,
 };
 const nativeFetch = globalThis.fetch;
 const mockFetch = (

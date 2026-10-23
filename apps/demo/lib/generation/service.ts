@@ -169,12 +169,14 @@ export const jobItem = (row: JobRow, artifacts: { id: string }[] = []) => {
     outputUrls: artifacts.map((a) => `/api/k0td-ai/media/${a.id}`),
     pricingSource: row.pricing_source,
     prompt: row.prompt,
+    stage: row.status,
     status: ["queued", "submitting", "running", "persisting"].includes(
       row.status
     )
       ? "pending"
       : row.status,
     tab: row.tab,
+    updatedAt: toIsoDate(row.updated_at),
   };
 };
 
@@ -355,13 +357,22 @@ export const submitGeneration = async (
 
 export const listJobs = async (
   userId: string,
-  options: { chatId?: string; cursor?: string } = {}
+  options: { activeOnly?: boolean; chatId?: string; cursor?: string } = {}
 ) => {
-  const { rows } = await pool.query<JobRow>(
-    "SELECT * FROM syntx_jobs WHERE user_id=$1 AND ($2::text IS NULL OR chat_id=$2) AND ($3::text IS NULL OR (created_at,id)<(SELECT created_at,id FROM syntx_jobs WHERE id=$3 AND user_id=$1)) ORDER BY created_at DESC,id DESC LIMIT 51",
-    [userId, options.chatId ?? null, options.cursor ?? null]
-  );
-  const visible = rows.slice(0, 50);
+  const activeQuery = options.activeOnly
+    ? await pool.query<JobRow>(
+        `SELECT * FROM syntx_jobs WHERE user_id=$1
+        AND (status IN ('queued','submitting','running','persisting','reconciling')
+          OR (status IN ('completed','failed') AND updated_at>now()-interval '5 minutes'))
+        ORDER BY created_at DESC,id DESC LIMIT 100`,
+        [userId]
+      )
+    : await pool.query<JobRow>(
+        "SELECT * FROM syntx_jobs WHERE user_id=$1 AND ($2::text IS NULL OR chat_id=$2) AND ($3::text IS NULL OR (created_at,id)<(SELECT created_at,id FROM syntx_jobs WHERE id=$3 AND user_id=$1)) ORDER BY created_at DESC,id DESC LIMIT 51",
+        [userId, options.chatId ?? null, options.cursor ?? null]
+      );
+  const { rows: jobRows } = activeQuery;
+  const visible = options.activeOnly ? jobRows : jobRows.slice(0, 50);
   const artifactRows = visible.length
     ? await pool.query<Pick<ArtifactRow, "id" | "job_id">>(
         "SELECT id,job_id FROM syntx_artifacts WHERE user_id=$1 AND job_id=ANY($2::text[]) ORDER BY ordinal",
@@ -376,6 +387,9 @@ export const listJobs = async (
         artifacts.filter((a) => a.job_id === r.id)
       )
     ),
-    nextCursor: rows.length > 50 ? visible.at(-1)?.id : undefined,
+    nextCursor:
+      !options.activeOnly && jobRows.length > 50
+        ? visible.at(-1)?.id
+        : undefined,
   };
 };

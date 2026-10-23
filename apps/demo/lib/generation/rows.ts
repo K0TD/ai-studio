@@ -13,6 +13,13 @@ export interface StoredProviderResult {
   urls?: ProviderOutput["urls"];
   cost?: number;
   generationId?: string;
+  diagnostic?: {
+    endpoint: string;
+    finishReasons?: string[];
+    outputCount?: number;
+    responseKeys?: string[];
+    status: number;
+  };
 }
 export type JobState =
   | "queued"

@@ -3,6 +3,10 @@ import { SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  generationPollDelay,
+  hasActiveGenerations,
+} from "@/lib/store/generation-sync";
 import { useK0tdStore } from "@/lib/store/k0td-store";
 
 import { AudioSettingsPanel } from "../../syntx/audio/audio-settings";
@@ -33,18 +37,111 @@ const SettingsContent = ({ tab }: SettingsContentProps) => {
 };
 const useServerRefresh = () => {
   const refreshServer = useK0tdStore((state) => state.refreshServer);
+  const refreshActiveJobs = useK0tdStore((state) => state.refreshActiveJobs);
+  const setGenerationSyncError = useK0tdStore(
+    (state) => state.setGenerationSyncError
+  );
   useEffect(() => {
     void refreshServer();
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") {
+    const refresh = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
         void refreshServer();
       }
-    }, 10_000);
+    };
+    const timer = setInterval(refresh, 60_000);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       clearInterval(timer);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
       useK0tdStore.getState().clearSession();
     };
   }, [refreshServer]);
+
+  useEffect(() => {
+    let stopped = false;
+    let inFlight = false;
+    let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      timer = undefined;
+      if (stopped || inFlight || document.visibilityState !== "visible") {
+        return;
+      }
+      if (!navigator.onLine) {
+        setGenerationSyncError("Нет подключения к интернету");
+        return;
+      }
+      inFlight = true;
+      let nextDelay = generationPollDelay(true, failures + 1);
+      try {
+        const hasActive = await refreshActiveJobs();
+        failures = 0;
+        nextDelay = generationPollDelay(hasActive, failures);
+      } catch {
+        failures += 1;
+        setGenerationSyncError("Сервер пока не отвечает");
+        nextDelay = generationPollDelay(true, failures);
+      } finally {
+        inFlight = false;
+      }
+      if (
+        !stopped &&
+        document.visibilityState === "visible" &&
+        navigator.onLine
+      ) {
+        timer = setTimeout(poll, nextDelay);
+      }
+    };
+
+    const resume = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        failures = 0;
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        poll();
+      }
+    };
+    const offline = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      setGenerationSyncError("Нет подключения к интернету");
+    };
+
+    const unsubscribe = useK0tdStore.subscribe((state, previous) => {
+      if (
+        !hasActiveGenerations(previous.history) &&
+        hasActiveGenerations(state.history)
+      ) {
+        failures = 0;
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        poll();
+      }
+    });
+    poll();
+    window.addEventListener("online", resume);
+    window.addEventListener("offline", offline);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      window.removeEventListener("online", resume);
+      window.removeEventListener("offline", offline);
+      document.removeEventListener("visibilitychange", resume);
+      unsubscribe();
+    };
+  }, [refreshActiveJobs, setGenerationSyncError]);
+
   const activeChatId = useK0tdStore((state) => state.activeChatId);
   useEffect(() => {
     if (!activeChatId) {
@@ -83,13 +180,19 @@ const AccountStatus = () => {
   );
 };
 const ConnectionStatus = () => {
-  const error = useK0tdStore((state) => state.serverError);
+  const error = useK0tdStore(
+    (state) => state.generationSyncError ?? state.serverError
+  );
+  const lastSync = useK0tdStore((state) => state.generationSyncAt);
   return error ? (
     <output
       role="alert"
       className="border-b bg-amber-50 p-3 text-center text-sm text-amber-900"
     >
-      Не удалось обновить данные: {error}. Повторяем подключение…
+      Связь прервана: {error}. Повторяем подключение автоматически.
+      {lastSync
+        ? ` Последняя синхронизация: ${new Date(lastSync).toLocaleTimeString("ru-RU")}.`
+        : ""}
     </output>
   ) : null;
 };

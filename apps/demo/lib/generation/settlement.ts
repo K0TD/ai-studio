@@ -220,6 +220,19 @@ export const settleJob = async (input: Settlement): Promise<void> => {
       );
     }
     await client.query("COMMIT");
+    console.info(
+      JSON.stringify({
+        chargedCostRub: chargedRub,
+        event: "generation.settled",
+        jobId: job.id,
+        manual: input.manual ?? false,
+        pricingSource: source,
+        providerCostRub: actual,
+        releasedReserveRub: formatKopecks(held),
+        status: input.status,
+        varianceRub: variance,
+      })
+    );
     if (varianceValue > 0n) {
       console.error(
         JSON.stringify({

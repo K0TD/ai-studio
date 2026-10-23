@@ -107,6 +107,8 @@ export const SyntxHeader = ({
           </button>
           <button
             onClick={() => setBalanceOpen(true)}
+            title={`Доступно ${formatRub(balanceRub)}. В резерве: ${formatRub(Number(user?.reservedRub ?? 0))}`}
+            aria-label={`Доступно ${formatRub(balanceRub)}. В резерве: ${formatRub(Number(user?.reservedRub ?? 0))}`}
             className="flex items-center gap-2 rounded-full border border-syntx-line/70 bg-syntx-surface px-3 py-2 text-xs font-semibold tabular-nums"
           >
             <Wallet className="size-3.5 text-syntx-accent" />

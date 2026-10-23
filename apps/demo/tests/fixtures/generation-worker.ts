@@ -16,10 +16,15 @@ import type { JobRow } from "../../lib/generation/rows";
 import {
   createQuote,
   getJob,
+  listJobs,
   submitGeneration,
 } from "../../lib/generation/service";
 import { settleJob } from "../../lib/generation/settlement";
-import { workerTick } from "../../lib/generation/worker";
+import {
+  releaseConfirmedImageFailures,
+  releaseExpiredUnconfirmedSubmissions,
+  workerTick,
+} from "../../lib/generation/worker";
 import { routerai, RouterAIError } from "../../lib/routerai/client";
 import type { ProviderModel } from "../../lib/routerai/responses";
 import { adminRowsResponseSchema } from "../../lib/store/admin-contracts";
@@ -55,12 +60,26 @@ const models: ProviderModel[] = [
 ];
 routerai.getModels = () => Promise.resolve(models);
 let posts = 0;
-let responseMode: "success" | "empty" | "timeout" | "video" = "success";
+let responseMode:
+  | "success"
+  | "empty"
+  | "timeout"
+  | "video"
+  | "video-uncertain" = "success";
 const providerResponse = (path: string, init: RequestInit = {}) => {
   if (init.method === "POST") {
     posts += 1;
     if (process.argv[2] === "resume") {
       throw new Error("Paid POST repeated after restart");
+    }
+    if (responseMode === "video-uncertain") {
+      throw new RouterAIError(
+        "Fixture lost response after provider accepted video",
+        502,
+        undefined,
+        true,
+        { generationId: "video-fixture" }
+      );
     }
     if (responseMode === "timeout") {
       throw new RouterAIError("Fixture lost response", 502, undefined, true);
@@ -236,6 +255,16 @@ try {
     assert.equal(completed.status, "completed");
     assert.equal(completed.chargedCostRub, "3.40");
     assert.equal(completed.outputUrls.length, 1);
+    const history = await listJobs(successful.owner.id, {
+      chatId: successful.item.chatId,
+    });
+    const visibleResult = history.items.find(
+      (item) => item.id === successful.item.id
+    );
+    assert.equal(visibleResult?.status, "completed");
+    assert.equal(visibleResult?.stage, "completed");
+    assert.ok(visibleResult?.updatedAt);
+    assert.equal(visibleResult?.outputUrls.length, 1);
     await assertWallet(successful.owner.id, "96.60", "0.00");
     await settleJob({
       jobId: successful.item.id,
@@ -247,18 +276,30 @@ try {
     responseMode = "empty";
     const empty = await fixture();
     await workerTick();
-    let emptyRow = await jobRow(empty.item.id);
-    assert.equal(emptyRow.status, "reconciling");
-    assert.equal(emptyRow.provider_id, "gen-empty");
-    assert.equal(emptyRow.provider_result?.cost, 3.4);
-    await assertWallet(empty.owner.id, "100.00", "4.80");
+    const emptyRow = await jobRow(empty.item.id);
+    assert.equal(emptyRow.status, "failed");
+    assert.equal(emptyRow.provider_cost_rub, "3.40");
+    assert.equal(emptyRow.charged_cost_rub, "0.00");
+    await assertWallet(empty.owner.id, "100.00", "0.00");
     await ensureDatabase();
-    await workerTick();
-    emptyRow = await jobRow(empty.item.id);
-    assert.equal(emptyRow.status, "reconciling");
-    await assertWallet(empty.owner.id, "100.00", "4.80");
     assert.equal(posts, 2);
-    await assertAdminJobResponse(successful.item.id, empty.item.id);
+
+    const legacyEmpty = await fixture();
+    await pool.query(
+      "UPDATE syntx_jobs SET status='reconciling',provider_id='gen-legacy-empty',provider_result=$2 WHERE id=$1",
+      [
+        legacyEmpty.item.id,
+        JSON.stringify({
+          diagnostic: { endpoint: "/images", status: 200 },
+          generationId: "gen-legacy-empty",
+        }),
+      ]
+    );
+    await releaseConfirmedImageFailures();
+    const releasedLegacyRow = await jobRow(legacyEmpty.item.id);
+    assert.equal(releasedLegacyRow.status, "failed");
+    await assertWallet(legacyEmpty.owner.id, "100.00", "0.00");
+    assert.equal(posts, 2);
 
     const abandoned = await fixture();
     await pool.query(
@@ -276,6 +317,38 @@ try {
     await assertJobStatus(uncertain.owner.id, uncertain.item.id, "reconciling");
     await assertWallet(uncertain.owner.id, "100.00", "4.80");
     assert.equal(posts, 3);
+    await assertAdminJobResponse(successful.item.id, uncertain.item.id);
+    await releaseExpiredUnconfirmedSubmissions();
+    const recentUncertainRow = await jobRow(uncertain.item.id);
+    assert.equal(recentUncertainRow.status, "reconciling");
+    await assertWallet(uncertain.owner.id, "100.00", "4.80");
+    await pool.query(
+      "UPDATE syntx_jobs SET updated_at=now()-interval '20 minutes' WHERE id=$1",
+      [uncertain.item.id]
+    );
+    await releaseExpiredUnconfirmedSubmissions();
+    const expiredUncertainRow = await jobRow(uncertain.item.id);
+    assert.equal(expiredUncertainRow.status, "failed");
+    await assertWallet(uncertain.owner.id, "100.00", "0.00");
+
+    const uncertainImageWithId = await fixture();
+    await pool.query(
+      "UPDATE syntx_jobs SET status='reconciling',provider_id='image-no-result',provider_result=$2,updated_at=now()-interval '20 minutes' WHERE id=$1",
+      [
+        uncertainImageWithId.item.id,
+        JSON.stringify({
+          diagnostic: { endpoint: "/images", outputCount: 0, status: 502 },
+          generationId: "image-no-result",
+        }),
+      ]
+    );
+    await releaseExpiredUnconfirmedSubmissions();
+    await assertJobStatus(
+      uncertainImageWithId.owner.id,
+      uncertainImageWithId.item.id,
+      "failed"
+    );
+    await assertWallet(uncertainImageWithId.owner.id, "100.00", "0.00");
 
     responseMode = "success";
     const speech = await fixture("audio");
@@ -293,6 +366,26 @@ try {
     await assertWallet(video.owner.id, "94.90", "0.00");
     assert.equal(posts, 5);
 
+    responseMode = "video-uncertain";
+    const uncertainVideo = await fixture("video");
+    await workerTick();
+    const uncertainVideoJob = await jobRow(uncertainVideo.item.id);
+    assert.equal(uncertainVideoJob.status, "reconciling");
+    assert.equal(uncertainVideoJob.provider_id, "video-fixture");
+    const activeJobs = await listJobs(uncertainVideo.owner.id, {
+      activeOnly: true,
+    });
+    assert.ok(
+      activeJobs.items.some((item) => item.id === uncertainVideo.item.id)
+    );
+    await workerTick();
+    await assertJobStatus(
+      uncertainVideo.owner.id,
+      uncertainVideo.item.id,
+      "completed"
+    );
+    assert.equal(posts, 6);
+
     responseMode = "success";
     const retry = await fixture();
     const blocked = join(mediaRoot, retry.item.id, "0.bin");
@@ -300,7 +393,7 @@ try {
     await workerTick();
     const retryRow = await jobRow(retry.item.id);
     assert.equal(retryRow.status, "persisting");
-    assert.equal(posts, 6);
+    assert.equal(posts, 7);
     await rmdir(blocked);
     await pool.query("UPDATE syntx_jobs SET poll_at=now() WHERE id=$1", [
       retry.item.id,

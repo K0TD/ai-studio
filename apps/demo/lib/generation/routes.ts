@@ -25,6 +25,7 @@ import {
   readJson,
   rateLimit,
   idempotencyKey,
+  currentRequestId,
 } from "@/lib/security/http";
 
 import { catalogModels, permittedModel } from "./catalog";
@@ -52,11 +53,37 @@ const idFrom = async (context: Context) => {
 export const quotePost = apiRoute(async (request) => {
   const user = await requireUser(request);
   await rateLimit(`quote:${user.id}`, 60, 60);
+  const body = await readJson(request, generationRequestSchema);
+  let quote: Awaited<ReturnType<typeof createQuote>>;
+  try {
+    quote = await createQuote(user, body);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        errorType: error instanceof Error ? error.name : "UnknownError",
+        event: "generation.quote_rejected",
+        hasFrameReferences: Boolean(body.settings.frameImages?.length),
+        hasImageReferences: Boolean(body.settings.inputReferences?.length),
+        modelId: body.modelId,
+        requestId: currentRequestId(),
+        tab: body.tab,
+      })
+    );
+    throw error;
+  }
+  console.info(
+    JSON.stringify({
+      estimatedCostRub: quote.estimatedCostRub,
+      event: "generation.quote_created",
+      maxCostRub: quote.maxCostRub,
+      modelId: body.modelId,
+      quoteId: quote.id,
+      requestId: currentRequestId(),
+      tab: body.tab,
+    })
+  );
   return Response.json({
-    quote: await createQuote(
-      user,
-      await readJson(request, generationRequestSchema)
-    ),
+    quote,
   });
 });
 export const generatePost = apiRoute(async (request) => {
@@ -64,23 +91,49 @@ export const generatePost = apiRoute(async (request) => {
   await rateLimit(`generate:${user.id}`, 20, 60);
   const body = await readJson(request, submitRequestSchema);
   const { quoteId, ...generation } = body;
-  return Response.json(
-    {
-      item: await submitGeneration(
-        user,
-        generation,
-        quoteId,
-        idempotencyKey(request)
-      ),
-    },
-    { status: 202 }
+  let item: Awaited<ReturnType<typeof submitGeneration>>;
+  try {
+    item = await submitGeneration(
+      user,
+      generation,
+      quoteId,
+      idempotencyKey(request)
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        errorType: error instanceof Error ? error.name : "UnknownError",
+        event: "generation.submit_rejected",
+        hasFrameReferences: Boolean(generation.settings.frameImages?.length),
+        hasImageReferences: Boolean(
+          generation.settings.inputReferences?.length
+        ),
+        modelId: generation.modelId,
+        requestId: currentRequestId(),
+        tab: generation.tab,
+      })
+    );
+    throw error;
+  }
+  console.info(
+    JSON.stringify({
+      event: "generation.accepted",
+      jobId: item.id,
+      maxCostRub: item.maxCostRub,
+      modelId: item.modelId,
+      requestId: currentRequestId(),
+      status: item.status,
+      tab: item.tab,
+    })
   );
+  return Response.json({ item }, { status: 202 });
 });
 export const jobsGet = apiRoute(async (request) => {
   const user = await requireUser(request);
   const url = new URL(request.url);
   const options = z
     .object({
+      active: z.enum(["true", "false"]).optional(),
       chatId: z.string().uuid().optional(),
       cursor: z.string().uuid().optional(),
     })
@@ -88,7 +141,12 @@ export const jobsGet = apiRoute(async (request) => {
   if (!options.success) {
     throw new ApiError(400, "Некорректные параметры списка");
   }
-  return Response.json(await listJobs(user.id, options.data));
+  return Response.json(
+    await listJobs(user.id, {
+      ...options.data,
+      activeOnly: options.data.active === "true",
+    })
+  );
 });
 export const jobGet = apiRoute(async (request, context: Context) => {
   const user = await requireUser(request);

@@ -6,6 +6,7 @@ export interface ProviderFailureContext {
     status: number;
     responseKeys?: string[];
     finishReasons?: string[];
+    outputCount?: number;
   };
 }
 

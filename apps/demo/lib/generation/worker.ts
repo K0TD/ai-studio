@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { z } from "zod";
+
 import { pool } from "@/lib/db";
 import { toIsoDate } from "@/lib/db/date";
 import { downloadMedia } from "@/lib/media/download";
@@ -31,6 +33,7 @@ import { settleJob } from "./settlement";
 const workerId = randomUUID();
 let currentLease: { id: string; token: string } | undefined;
 let lastCatalogSync = 0;
+let lastReconciliationSweep = 0;
 
 type Job = JobRow;
 const heartbeat = async () => {
@@ -61,7 +64,9 @@ const claimJob = async (): Promise<Job | null> => {
   const token = randomUUID();
   const result = await pool.query<JobRow>(
     `UPDATE syntx_jobs SET lease_token=$1,leased_until=now()+interval '120 seconds',attempts=attempts+1
-    WHERE id=(SELECT id FROM syntx_jobs WHERE status IN ('queued','running','persisting') AND settled_at IS NULL
+    WHERE id=(SELECT id FROM syntx_jobs WHERE
+      (status IN ('queued','running','persisting') OR (status='reconciling' AND tab='video' AND provider_id IS NOT NULL))
+      AND settled_at IS NULL
       AND poll_at<=now() AND (leased_until IS NULL OR leased_until<now()) ORDER BY poll_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
     [token]
   );
@@ -90,6 +95,16 @@ const recordProvider = async (
   job.provider_result = result;
   job.status = status;
   job.provider_id = providerId ?? job.provider_id;
+  console.info(
+    JSON.stringify({
+      event: "generation.provider_result_recorded",
+      jobId: job.id,
+      outputCount: result.urls?.length ?? result.unsigned_urls?.length,
+      providerId: job.provider_id,
+      providerStatus: result.status,
+      state: status,
+    })
+  );
 };
 const markReconciling = async (job: Job, context?: ProviderFailureContext) => {
   await pool.query(
@@ -102,14 +117,233 @@ const markReconciling = async (job: Job, context?: ProviderFailureContext) => {
     ]
   );
   console.error(
-    JSON.stringify({ event: "generation.reconciling", jobId: job.id })
+    JSON.stringify({
+      diagnostic: context?.diagnostic,
+      event: "generation.reconciling",
+      jobId: job.id,
+      modelId: job.model_id,
+      providerCostRub: context?.cost,
+      providerId: context?.generationId ?? job.provider_id,
+      tab: job.tab,
+    })
   );
+};
+const confirmedImageFailureSchema = z.object({
+  cost: z.number().nonnegative().optional(),
+  diagnostic: z
+    .object({
+      endpoint: z.string(),
+      outputCount: z.number().int().nonnegative().optional(),
+      status: z.number().int(),
+    })
+    .optional(),
+});
+const serializedConfirmedImageFailureSchema = z
+  .string()
+  .transform((serialized, context) => {
+    try {
+      return JSON.parse(serialized);
+    } catch {
+      context.addIssue({ code: "custom", message: "Invalid stored JSON" });
+      return z.NEVER;
+    }
+  })
+  .pipe(confirmedImageFailureSchema);
+const storedConfirmedImageFailureSchema = z.union([
+  confirmedImageFailureSchema,
+  serializedConfirmedImageFailureSchema,
+]);
+const providerOutputSchema = z
+  .object({
+    diagnostic: z
+      .object({ outputCount: z.number().int().nonnegative().optional() })
+      .passthrough()
+      .optional(),
+    unsigned_urls: z.array(z.string()).optional(),
+    urls: z.array(z.string()).optional(),
+  })
+  .passthrough();
+const serializedProviderOutputSchema = z
+  .string()
+  .transform((serialized, context) => {
+    try {
+      return JSON.parse(serialized);
+    } catch {
+      context.addIssue({ code: "custom", message: "Invalid stored JSON" });
+      return z.NEVER;
+    }
+  })
+  .pipe(providerOutputSchema);
+const storedProviderOutputSchema = z.union([
+  providerOutputSchema,
+  serializedProviderOutputSchema,
+]);
+// SQLite stores JSON as text while PostgreSQL returns JSON objects; both are parsed here.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Database JSON is parsed with the schemas above.
+const confirmedImageFailure = (value: unknown) => {
+  const parsed = storedConfirmedImageFailureSchema.safeParse(value);
+  if (!parsed.success) {
+    return;
+  }
+  const { diagnostic } = parsed.data;
+  if (
+    diagnostic?.status !== 200 ||
+    (diagnostic.outputCount !== undefined && diagnostic.outputCount !== 0) ||
+    !["/images", "/chat/completions"].includes(diagnostic.endpoint)
+  ) {
+    return;
+  }
+  return parsed.data;
+};
+export const releaseConfirmedImageFailures = async () => {
+  const { rows } = await pool.query<JobRow>(
+    `SELECT * FROM syntx_jobs j WHERE j.status='reconciling' AND j.tab='image'
+    AND j.settled_at IS NULL AND j.provider_result IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM syntx_artifacts a WHERE a.job_id=j.id)
+    ORDER BY j.created_at LIMIT 100`
+  );
+  for (const job of rows) {
+    const failure = confirmedImageFailure(job.provider_result);
+    if (!failure) {
+      continue;
+    }
+    await settleJob({
+      jobId: job.id,
+      providerCost: failure.cost,
+      reason:
+        "Провайдер подтвердил запрос, но не вернул изображение. Резерв возвращён, списания пользователю нет.",
+      status: "failed",
+    });
+    console.error(
+      JSON.stringify({
+        endpoint: failure.diagnostic?.endpoint,
+        event: "generation.confirmed_without_output_released",
+        jobId: job.id,
+        providerId: job.provider_id,
+        responseStatus: failure.diagnostic?.status,
+      })
+    );
+  }
+};
+export const releaseExpiredUnconfirmedSubmissions = async () => {
+  const { rows } = await pool.query<JobRow>(
+    `SELECT * FROM syntx_jobs j WHERE j.status='reconciling'
+    AND j.settled_at IS NULL
+    AND j.updated_at<now()-interval '15 minutes'
+    AND NOT (j.tab='video' AND j.provider_id IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM syntx_artifacts a WHERE a.job_id=j.id)
+    ORDER BY j.created_at LIMIT 100`
+  );
+  for (const job of rows) {
+    const parsedProviderOutput = storedProviderOutputSchema.safeParse(
+      job.provider_result
+    );
+    let hasProviderOutput = Boolean(job.provider_result);
+    if (parsedProviderOutput.success) {
+      hasProviderOutput = Boolean(
+        parsedProviderOutput.data.urls?.length ||
+        parsedProviderOutput.data.unsigned_urls?.length ||
+        (parsedProviderOutput.data.diagnostic?.outputCount ?? 0) > 0
+      );
+    }
+    if (
+      hasProviderOutput ||
+      (job.tab === "video" && Boolean(job.provider_id))
+    ) {
+      continue;
+    }
+    await settleJob({
+      jobId: job.id,
+      reason:
+        "Не удалось подтвердить и сохранить результат за 15 минут. Резерв возвращён; повторите генерацию.",
+      status: "failed",
+    });
+    console.warn(
+      JSON.stringify({
+        event: "generation.unconfirmed_timeout_released",
+        jobId: job.id,
+        modelId: job.model_id,
+        providerId: job.provider_id,
+        tab: job.tab,
+        waitMinutes: Math.floor(
+          (Date.now() - new Date(toIsoDate(job.updated_at)).getTime()) / 60_000
+        ),
+      })
+    );
+  }
 };
 const retryLater = async (job: Job) => {
   await pool.query(
     "UPDATE syntx_jobs SET poll_at=now()+interval '10 seconds',lease_token=NULL,leased_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND settled_at IS NULL",
     [job.id, job.lease_token]
   );
+};
+
+const pollVideoStatus = async (job: Job) => {
+  const statusStartedAt = performance.now();
+  const status = await routerai.getVideoStatus(job.provider_id ?? "");
+  console.info(
+    JSON.stringify({
+      durationMs: Math.round(performance.now() - statusStartedAt),
+      event: "generation.provider_status_received",
+      jobId: job.id,
+      providerCostRub: status.usage?.cost,
+      providerId: job.provider_id,
+      providerStatus: status.status,
+      state: job.status,
+    })
+  );
+  if (["failed", "cancelled", "expired"].includes(status.status)) {
+    await settleJob({
+      jobId: job.id,
+      leaseToken: job.lease_token ?? undefined,
+      providerCost: status.usage?.cost,
+      reason: "Провайдер подтвердил отказ генерации",
+      status: "failed",
+    });
+    job.status = "failed";
+    return;
+  }
+  if (status.status === "completed") {
+    await recordProvider(
+      job,
+      status,
+      "persisting",
+      job.provider_id ?? undefined
+    );
+    return;
+  }
+  await retryLater(job);
+};
+
+const settleConfirmedImageFailure = async (
+  job: Job,
+  context: ProviderFailureContext
+): Promise<boolean> => {
+  if (job.status !== "submitting" || job.tab !== "image") {
+    return false;
+  }
+  const failure = confirmedImageFailure(context);
+  if (!failure) {
+    return false;
+  }
+  if (context.generationId) {
+    job.provider_id = context.generationId;
+    await pool.query(
+      "UPDATE syntx_jobs SET provider_id=coalesce($3,provider_id) WHERE id=$1 AND lease_token=$2 AND settled_at IS NULL",
+      [job.id, job.lease_token, job.provider_id]
+    );
+  }
+  await settleJob({
+    jobId: job.id,
+    leaseToken: job.lease_token ?? undefined,
+    providerCost: failure.cost,
+    reason:
+      "Провайдер подтвердил запрос, но не вернул изображение. Резерв возвращён, списания пользователю нет.",
+    status: "failed",
+  });
+  job.status = "failed";
+  return true;
 };
 
 const prepareReferences = async (job: Job) => {
@@ -188,11 +422,59 @@ const authorizeSubmission = async (job: Job) => {
   }
 };
 
+const traceProviderOperation = async <Result>(
+  job: Job,
+  operation: "image_submit" | "speech_submit" | "video_submit",
+  send: () => Promise<Result>
+): Promise<Result> => {
+  const startedAt = performance.now();
+  try {
+    const result = await send();
+    console.info(
+      JSON.stringify({
+        durationMs: Math.round(performance.now() - startedAt),
+        event: "generation.provider_response_received",
+        jobId: job.id,
+        modelId: job.model_id,
+        operation,
+      })
+    );
+    return result;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        durationMs: Math.round(performance.now() - startedAt),
+        errorType: error instanceof Error ? error.name : "UnknownError",
+        event: "generation.provider_request_failed",
+        jobId: job.id,
+        modelId: job.model_id,
+        operation,
+        providerDiagnostic:
+          error instanceof RouterAIError
+            ? error.context?.diagnostic
+            : undefined,
+        uncertain: error instanceof RouterAIError && error.uncertain,
+      })
+    );
+    throw error;
+  }
+};
+
 const submit = async (job: Job) => {
   const { settings, prompt, modelId } = job.request;
   await ensureMediaCapacity();
   const references = await prepareReferences(job);
   await authorizeSubmission(job);
+  console.info(
+    JSON.stringify({
+      event: "generation.provider_submit_started",
+      hasFrameReferences: references.frames.length > 0,
+      hasImageReferences: references.input.length > 0,
+      jobId: job.id,
+      modelId,
+      tab: job.tab,
+    })
+  );
   if (job.tab === "video") {
     const payload: VideoGenerateRequest = {
       aspect_ratio: settings.aspectRatio,
@@ -211,34 +493,74 @@ const submit = async (job: Job) => {
         options: { heygen: { voice_id: settings.heygenVoiceId } },
       };
     }
-    const result = await routerai.generateVideo(payload);
+    const result = await traceProviderOperation(job, "video_submit", () =>
+      routerai.generateVideo(payload)
+    );
     await recordProvider(job, result, "running", result.id);
+    console.info(
+      JSON.stringify({
+        event: "generation.provider_submit_accepted",
+        jobId: job.id,
+        modelId,
+        providerId: result.id,
+        providerStatus: result.status,
+        tab: job.tab,
+      })
+    );
   } else if (job.tab === "image") {
-    const result = await routerai.generateImage({
-      aspect_ratio: settings.aspectRatio,
-      background: settings.background,
-      input_references: references.input.length ? references.input : undefined,
-      model: modelId,
-      n: settings.n,
-      negative_prompt: settings.negativePrompt,
-      output_format: settings.outputFormat,
-      prompt,
-      quality: settings.quality,
-      resolution: settings.resolution,
-      seed: settings.seed,
-    });
+    const result = await traceProviderOperation(job, "image_submit", () =>
+      routerai.generateImage({
+        aspect_ratio: settings.aspectRatio,
+        background: settings.background,
+        input_references: references.input.length
+          ? references.input
+          : undefined,
+        model: modelId,
+        n: settings.n,
+        negative_prompt: settings.negativePrompt,
+        output_format: settings.outputFormat,
+        prompt,
+        quality: settings.quality,
+        resolution: settings.resolution,
+        seed: settings.seed,
+      })
+    );
     await recordProvider(job, result, "persisting", result.generationId);
+    console.info(
+      JSON.stringify({
+        event: "generation.provider_submit_accepted",
+        imageCount: result.urls.length,
+        jobId: job.id,
+        modelId,
+        providerCostRub: result.cost,
+        providerId: result.generationId,
+        tab: job.tab,
+      })
+    );
   } else {
-    if (!settings.voiceId) {
+    const { voiceId } = settings;
+    if (!voiceId) {
       throw new ApiError(422, "Голос не выбран");
     }
-    const result = await routerai.generateSpeech({
-      input: prompt,
-      model: modelId,
-      response_format: "mp3",
-      voice: settings.voiceId,
-    });
+    const result = await traceProviderOperation(job, "speech_submit", () =>
+      routerai.generateSpeech({
+        input: prompt,
+        model: modelId,
+        response_format: "mp3",
+        voice: voiceId,
+      })
+    );
     await recordProvider(job, result, "persisting", result.generationId);
+    console.info(
+      JSON.stringify({
+        event: "generation.provider_submit_accepted",
+        jobId: job.id,
+        modelId,
+        providerCostRub: result.cost,
+        providerId: result.generationId,
+        tab: job.tab,
+      })
+    );
   }
 };
 
@@ -261,6 +583,15 @@ const persistArtifact = async (
   await pool.query(
     "INSERT INTO syntx_artifacts (id,job_id,user_id,ordinal,storage_key,mime_type,size_bytes) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(job_id,ordinal) DO UPDATE SET storage_key=excluded.storage_key,mime_type=excluded.mime_type,size_bytes=excluded.size_bytes",
     [randomUUID(), job.id, job.user_id, ordinal, key, finalMime, bytes.length]
+  );
+  console.info(
+    JSON.stringify({
+      bytes: bytes.length,
+      event: "generation.artifact_persisted",
+      jobId: job.id,
+      mimeType: finalMime,
+      ordinal,
+    })
   );
 };
 const persistResult = async (job: Job) => {
@@ -344,6 +675,24 @@ const runMaintenance = async () => {
   }
 };
 
+const runReconciliationSweep = async () => {
+  if (Date.now() - lastReconciliationSweep < 30_000) {
+    return;
+  }
+  lastReconciliationSweep = Date.now();
+  try {
+    await releaseConfirmedImageFailures();
+    await releaseExpiredUnconfirmedSubmissions();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        error: error instanceof Error ? error.message : "Unknown error",
+        event: "generation.reconciliation_sweep_failed",
+      })
+    );
+  }
+};
+
 const refreshCatalogIfNeeded = async () => {
   if (Date.now() - lastCatalogSync > 15 * 60_000) {
     try {
@@ -356,71 +705,111 @@ const refreshCatalogIfNeeded = async () => {
   }
 };
 
-const handleJobError = async (job: Job, error: Error) => {
-  const providerError = error instanceof RouterAIError ? error : undefined;
-  const isApi = error instanceof ApiError;
-  const isUncertain = Boolean(providerError?.uncertain);
+const failJob = async (job: Job, reason: string) => {
+  await settleJob({
+    jobId: job.id,
+    leaseToken: job.lease_token ?? undefined,
+    reason,
+    status: "failed",
+  });
+  job.status = "failed";
+};
 
+const handleSubmittingError = async (job: Job, error: Error) => {
+  const providerError = error instanceof RouterAIError ? error : undefined;
   if (
-    job.status === "queued" ||
-    ((providerError || isApi) && !isUncertain && job.status === "submitting")
+    providerError?.context &&
+    (await settleConfirmedImageFailure(job, providerError.context))
   ) {
-    await settleJob({
-      jobId: job.id,
-      leaseToken: job.lease_token ?? undefined,
-      reason: error.message || "Не удалось подготовить запрос генерации",
-      status: "failed",
-    });
-  } else if (job.status === "submitting") {
-    await markReconciling(job, providerError?.context);
-  } else if (job.status === "running" || job.status === "persisting") {
-    // GET/download/storage retries are safe. A reservation never expires with a browser timeout.
-    const exhausted =
-      job.attempts > 500 ||
-      Date.now() - new Date(toIsoDate(job.created_at)).getTime() >
-        7 * 24 * 60 * 60_000;
-    await (exhausted ? markReconciling(job) : retryLater(job));
-  } else {
+    job.status = "failed";
+    return;
+  }
+  const confirmedRejection =
+    (providerError || error instanceof ApiError) && !providerError?.uncertain;
+  if (confirmedRejection) {
+    await failJob(
+      job,
+      error.message || "Не удалось подготовить запрос генерации"
+    );
+    return;
+  }
+  await markReconciling(job, providerError?.context);
+  job.status = "reconciling";
+};
+
+const retryOrReconcile = async (job: Job) => {
+  const exhausted =
+    job.attempts > 500 ||
+    Date.now() - new Date(toIsoDate(job.created_at)).getTime() >
+      7 * 24 * 60 * 60_000;
+  await (exhausted ? markReconciling(job) : retryLater(job));
+};
+
+const retryReconcilingVideo = async (job: Job, error: Error) => {
+  if (job.tab !== "video" || !job.provider_id) {
     throw error;
+  }
+  await retryLater(job);
+};
+
+const handleJobError = async (job: Job, error: Error) => {
+  switch (job.status) {
+    case "queued": {
+      await failJob(
+        job,
+        error.message || "Не удалось подготовить запрос генерации"
+      );
+      return;
+    }
+    case "submitting": {
+      await handleSubmittingError(job, error);
+      return;
+    }
+    case "running":
+    case "persisting": {
+      await retryOrReconcile(job);
+      return;
+    }
+    case "reconciling": {
+      await retryReconcilingVideo(job, error);
+      break;
+    }
+    default: {
+      throw error;
+    }
   }
 };
 
 export const workerTick = async (): Promise<number> => {
   await heartbeat();
   await runMaintenance();
+  await runReconciliationSweep();
   await refreshCatalogIfNeeded();
   const job = await claimJob();
   if (!job) {
     return 0;
   }
+  console.info(
+    JSON.stringify({
+      attempts: job.attempts,
+      event: "generation.job_claimed",
+      jobId: job.id,
+      modelId: job.model_id,
+      providerId: job.provider_id,
+      state: job.status,
+      tab: job.tab,
+    })
+  );
   currentLease = { id: job.id, token: job.lease_token ?? "" };
   try {
     if (job.status === "queued") {
       await submit(job);
     }
-    if (job.status === "running") {
-      const status = await routerai.getVideoStatus(job.provider_id ?? "");
-      if (["failed", "cancelled", "expired"].includes(status.status)) {
-        await settleJob({
-          jobId: job.id,
-          leaseToken: job.lease_token ?? undefined,
-          providerCost: status.usage?.cost,
-          reason: "Провайдер подтвердил отказ генерации",
-          status: "failed",
-        });
-        return 1;
-      }
-      if (status.status === "completed") {
-        await recordProvider(
-          job,
-          status,
-          "persisting",
-          job.provider_id ?? undefined
-        );
-      } else {
-        await retryLater(job);
-        return 1;
-      }
+    if (
+      job.status === "running" ||
+      (job.status === "reconciling" && job.tab === "video" && job.provider_id)
+    ) {
+      await pollVideoStatus(job);
     }
     if (job.status === "persisting") {
       await persistResult(job);
@@ -432,10 +821,21 @@ export const workerTick = async (): Promise<number> => {
     );
     console.error(
       JSON.stringify({
+        attempts: job.attempts,
         error: error instanceof Error ? error.message : String(error),
-        event: "generation.worker_retry",
+        event:
+          job.status === "failed"
+            ? "generation.job_failed"
+            : "generation.worker_retry",
         jobId: job.id,
+        modelId: job.model_id,
+        providerDiagnostic:
+          error instanceof RouterAIError
+            ? error.context?.diagnostic
+            : undefined,
+        providerId: job.provider_id,
         state: job.status,
+        tab: job.tab,
       })
     );
   } finally {

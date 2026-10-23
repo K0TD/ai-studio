@@ -19,6 +19,7 @@ import {
   okResponseSchema,
 } from "./client-contracts";
 import { modelAllowed, sectionAllowed } from "./client-policy";
+import { hasActiveGenerations, mergeGenerationItems } from "./generation-sync";
 export type K0tdTab = SyntxTab;
 export interface AvatarProfile {
   id: string;
@@ -135,9 +136,13 @@ export interface K0tdStoreState {
   unavailableModels: (ModelMetadata & { disabledReason?: string })[];
   serverReady: boolean;
   serverError: string | null;
+  generationSyncError: string | null;
+  generationSyncAt: string | null;
+  setGenerationSyncError: (error: string | null) => void;
   refreshServer: () => Promise<void>;
   clearSession: () => void;
   refreshJobs: () => Promise<void>;
+  refreshActiveJobs: () => Promise<boolean>;
   loadMoreJobs: () => Promise<void>;
   historyCursor: string | null;
   prompt: string;
@@ -215,16 +220,48 @@ interface ClientCatalog {
 }
 let refreshRevision = 0;
 let sessionRevision = 0;
+const retryableReadStatus = (status: number) =>
+  status === 408 || status === 429 || status >= 500;
+const readResponse = async (
+  path: string,
+  options: RequestInit | undefined,
+  retryable: boolean
+) => {
+  let attempt = 0;
+  for (;;) {
+    let response: Response;
+    try {
+      const timeoutSignal = AbortSignal.timeout(12_000);
+      response = await fetch(`/api/k0td-ai/${path}`, {
+        ...options,
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", ...options?.headers },
+        signal: options?.signal
+          ? AbortSignal.any([options.signal, timeoutSignal])
+          : timeoutSignal,
+      });
+    } catch (error) {
+      if (retryable && attempt === 0 && !options?.signal?.aborted) {
+        attempt += 1;
+        continue;
+      }
+      throw error;
+    }
+    if (retryable && attempt === 0 && retryableReadStatus(response.status)) {
+      attempt += 1;
+      await response.body?.cancel();
+      continue;
+    }
+    return response;
+  }
+};
 const server = async <T>(
   path: string,
   schema: z.ZodType<T>,
   options?: RequestInit
 ): Promise<T> => {
-  const response = await fetch(`/api/k0td-ai/${path}`, {
-    ...options,
-    cache: "no-store",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
+  const method = options?.method?.toUpperCase() ?? "GET";
+  const response = await readResponse(path, options, method === "GET");
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401) {
@@ -385,6 +422,8 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
       activeChatId: "",
       balanceRub: 0,
       chats: [],
+      generationSyncAt: null,
+      generationSyncError: null,
       history: [],
       historyCursor: null,
       isGenerating: false,
@@ -442,6 +481,8 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
   deleteGenerationItem: () => {
     toast.info("История хранится на сервере. Для скрытия удалите чат.");
   },
+  generationSyncAt: null,
+  generationSyncError: null,
   history: [],
   historyCursor: null,
   imageSettings: DEFAULT_IMAGE_SETTINGS,
@@ -472,6 +513,40 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
     }),
   models: [],
   prompt: "",
+  refreshActiveJobs: async () => {
+    const revision = sessionRevision;
+    const data = await server("jobs?active=true", jobsResponseSchema);
+    if (revision !== sessionRevision || !get().user) {
+      return false;
+    }
+    const current = get();
+    const previousById = new Map(
+      current.history.map((item) => [item.id, item])
+    );
+    const settledNewly = data.items.some((item) => {
+      const previous = previousById.get(item.id);
+      return (
+        (item.status === "completed" || item.status === "failed") &&
+        (previous?.status === "pending" || previous?.status === "reconciling")
+      );
+    });
+    set((state) => ({
+      generationSyncAt: new Date().toISOString(),
+      generationSyncError: null,
+      history: mergeGenerationItems(state.history, data.items),
+    }));
+    if (settledNewly) {
+      try {
+        const { user } = await server("me", accountResponseSchema);
+        if (revision === sessionRevision && get().user?.id === user.id) {
+          set({ balanceRub: Number(user.availableRub), user });
+        }
+      } catch {
+        // The next ordinary account refresh will repair a stale displayed balance.
+      }
+    }
+    return hasActiveGenerations(data.items);
+  },
   refreshJobs: async () => {
     const chatId = get().activeChatId;
     const revision = sessionRevision;
@@ -480,7 +555,10 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
       jobsResponseSchema
     );
     if (get().activeChatId === chatId && revision === sessionRevision) {
-      set({ history: data.items, historyCursor: data.nextCursor ?? null });
+      set((state) => ({
+        history: mergeGenerationItems(state.history, data.items),
+        historyCursor: data.nextCursor ?? null,
+      }));
     }
   },
   refreshServer: async () => {
@@ -545,7 +623,17 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
             ? undefined
             : current.chats.find((old) => old.id === candidate.id)?.draftPrompt,
         })),
-        history: [...jobs.items, ...retained],
+        generationSyncAt: new Date().toISOString(),
+        generationSyncError: null,
+        history: mergeGenerationItems(
+          current.history.filter(
+            (item) =>
+              item.status === "pending" ||
+              item.status === "reconciling" ||
+              item.chatId === chat?.id
+          ),
+          [...jobs.items, ...retained]
+        ),
         historyCursor,
         imageSettings: imageOptions(
           current.imageSettings,
@@ -614,6 +702,7 @@ export const useK0tdStore = create<K0tdStoreState>()((set, get) => ({
     });
   },
   setGenerating: (isGenerating) => set({ isGenerating }),
+  setGenerationSyncError: (generationSyncError) => set({ generationSyncError }),
   setPrompt: (prompt) =>
     set((state) => ({
       chats: state.chats.map((chat) =>

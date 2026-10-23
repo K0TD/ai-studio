@@ -85,14 +85,20 @@ const videoRequest = (
     seed: settings.seed,
   };
   const frameImages: NonNullable<GenerationSettings["frameImages"]> = [];
-  if (settings.firstFrameUrl) {
+  if (
+    settings.firstFrameUrl &&
+    model?.supportedFrameImages?.includes("first_frame")
+  ) {
     frameImages.push({
       frame_type: "first_frame",
       image_url: { url: settings.firstFrameUrl },
       type: "image_url",
     });
   }
-  if (settings.lastFrameUrl) {
+  if (
+    settings.lastFrameUrl &&
+    model?.supportedFrameImages?.includes("last_frame")
+  ) {
     frameImages.push({
       frame_type: "last_frame",
       image_url: { url: settings.lastFrameUrl },
@@ -100,7 +106,7 @@ const videoRequest = (
     });
   }
   result.frameImages = frameImages;
-  if (attachment) {
+  if (attachment && model?.supportsReferences) {
     result.inputReferences = [
       { file: { file_id: attachment.id }, type: "file" },
     ];
@@ -109,7 +115,8 @@ const videoRequest = (
 };
 const imageRequest = (
   settings: ImageSettings,
-  attachment: UploadedReference | null
+  attachment: UploadedReference | null,
+  supportsReferences: boolean
 ): GenerationSettings => {
   const result: GenerationSettings = {
     aspectRatio: settings.aspectRatio,
@@ -121,6 +128,9 @@ const imageRequest = (
     resolution: settings.resolution,
     seed: settings.seed,
   };
+  if (!supportsReferences) {
+    return result;
+  }
   if (attachment) {
     result.inputReferences = [
       { file: { file_id: attachment.id }, type: "file" },
@@ -138,22 +148,28 @@ const promptRequest = (
 ): GenerateRequest | null => {
   const common = { chatId: state.activeChatId, prompt: state.prompt.trim() };
   if (state.activeTab === "video") {
+    const model = state.models.find(
+      (candidate) => candidate.id === state.videoSettings.modelId
+    );
     return {
       ...common,
       modelId: state.videoSettings.modelId,
-      settings: videoRequest(
-        state.videoSettings,
-        state.models.find((model) => model.id === state.videoSettings.modelId),
-        attachment
-      ),
+      settings: videoRequest(state.videoSettings, model, attachment),
       tab: "video",
     };
   }
   if (state.activeTab === "image") {
+    const model = state.models.find(
+      (candidate) => candidate.id === state.imageSettings.modelId
+    );
     return {
       ...common,
       modelId: state.imageSettings.modelId,
-      settings: imageRequest(state.imageSettings, attachment),
+      settings: imageRequest(
+        state.imageSettings,
+        attachment,
+        model?.supportsReferences === true
+      ),
       tab: "image",
     };
   }
@@ -488,6 +504,11 @@ export const SyntxPromptBar = ({
   const model = state.models.find(
     (candidate) => candidate.id === request?.modelId
   );
+  useEffect(() => {
+    if (attachment && !model?.supportsReferences) {
+      setAttachment(null);
+    }
+  }, [attachment, model?.supportsReferences]);
   const allowed = !!request && modelAllowed(state.user, model);
   useChatInitialization(request, allowed);
   const { quote, error, quoting } = useQuote(

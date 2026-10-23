@@ -9,7 +9,7 @@ RUN bun install --frozen-lockfile
 FROM dependencies AS builder
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production
-RUN bun --bun run --filter=demo build && rm -rf apps/demo/.next/cache
+RUN bun --bun run --filter=demo build && rm -rf apps/demo/.next/cache apps/demo/.next/dev
 
 FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS runtime
 WORKDIR /app

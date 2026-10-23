@@ -34,7 +34,16 @@ export interface GenerationItem {
   modelId: string;
   prompt: string;
   createdAt: string;
+  updatedAt: string;
   status: "pending" | "completed" | "failed" | "reconciling";
+  stage:
+    | "queued"
+    | "submitting"
+    | "running"
+    | "persisting"
+    | "reconciling"
+    | "completed"
+    | "failed";
   costRub: number;
   estimatedCostRub?: string;
   maxCostRub?: string;

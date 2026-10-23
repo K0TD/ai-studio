@@ -20,10 +20,7 @@ export const userView = (account: typeof user.$inferSelect): AdminUser => {
     isEnvAdmin: Boolean(account.isEnvAdmin),
     lastActiveAt: toIsoDate(account.updatedAt),
     name: account.name,
-    permissions:
-      typeof account.permissions === "string"
-        ? JSON.parse(account.permissions)
-        : account.permissions,
+    permissions: account.permissions,
     reservedRub: formatKopecks(reservedKopecks),
     role: account.role,
     totalGenerations: 0,

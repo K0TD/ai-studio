@@ -287,6 +287,8 @@ export class RouterAIClient {
                 ? [choice.finish_reason]
                 : []
             ),
+            outputCount: urls.length,
+            responseKeys: Object.keys(result).toSorted().slice(0, 20),
             status: 200,
           },
           generationId: result.id,

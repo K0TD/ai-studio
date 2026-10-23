@@ -110,8 +110,18 @@ export const generationItemSchema = z.object({
   outputUrls: z.array(mediaUrlSchema).max(20),
   pricingSource: z.enum(["actual", "estimated"]).nullable().optional(),
   prompt: boundedText,
+  stage: z.enum([
+    "queued",
+    "submitting",
+    "running",
+    "persisting",
+    "reconciling",
+    "completed",
+    "failed",
+  ]),
   status: z.enum(["pending", "completed", "failed", "reconciling"]),
   tab: sectionSchema,
+  updatedAt: z.iso.datetime({ offset: true }),
 });
 export const generationResponseSchema = z.object({
   item: generationItemSchema,
