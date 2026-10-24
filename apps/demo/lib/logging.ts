@@ -170,12 +170,19 @@ export const initLogging = (service: Service): void => {
   }
   state.studioLoggingInitialized = true;
   const failures = { reported: false };
+  const debugOutput = console.debug.bind(console);
   for (const level of levels) {
     const original = console[level].bind(console);
     console[level] = (...args: unknown[]) => {
+      const serverActionProbe = args.some((argument) =>
+        String(argument).includes(
+          "The Server Reference ID did not match the expected format"
+        )
+      );
+      const logLevel = serverActionProbe ? "debug" : level;
       let sanitized: unknown;
       try {
-        sanitized = write(level, args);
+        sanitized = write(logLevel, args);
       } catch {
         sanitized = sanitizeLogValue(args);
         if (!failures.reported) {
@@ -183,7 +190,7 @@ export const initLogging = (service: Service): void => {
           fallback(JSON.stringify({ event: "logging.write_failed", service }));
         }
       }
-      original(
+      (serverActionProbe ? debugOutput : original)(
         typeof sanitized === "string" ? sanitized : format("%j", sanitized)
       );
     };

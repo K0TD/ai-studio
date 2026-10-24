@@ -114,3 +114,27 @@ test("initializes once and sanitizes both persistent logs and retained console o
   expect(persisted).not.toContain("provider-secret-probe");
   expect(persisted.trim().split("\n")).toHaveLength(2);
 });
+
+test("downgrades malformed Server Action reference probes to debug", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "studio-logging-probes-"));
+  directories.push(directory);
+  const script = `import { initLogging } from ${JSON.stringify(resolve(import.meta.dir, "logging.ts"))}; initLogging("startup"); console.error("The Server Reference ID did not match the expected format");`;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    env: { ...process.env, STORAGE_ROOT: directory },
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  expect(await child.exited).toBe(0);
+  const persisted = readFileSync(
+    join(directory, "logs", "startup.jsonl"),
+    "utf-8"
+  );
+  const probe = persisted
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .find((line) =>
+      JSON.stringify(line).includes("The Server Reference ID did not match")
+    );
+  expect(probe.level).toBe("debug");
+});
