@@ -80,6 +80,25 @@ export interface ProviderOutput {
 const providerEnvelopeSchema = z.looseObject({
   id: z.string().max(300).optional(),
 });
+const providerErrorDetailsSchema = z.union([
+  z.string().transform((message) => ({ code: undefined, message })),
+  z
+    .object({
+      code: z.union([z.number().int(), z.string()]).optional(),
+      message: z.string().optional(),
+    })
+    .transform(({ code, message }) => ({
+      code: code === undefined ? undefined : Number(code),
+      message,
+    })),
+]);
+const providerErrorEnvelopeSchema = z
+  .looseObject({
+    error: z.unknown(),
+    id: z.string().max(300).optional(),
+    usage: usageSchema,
+  })
+  .refine((value) => Object.hasOwn(value, "error"));
 type ProviderEnvelope = z.infer<typeof providerEnvelopeSchema>;
 const finishReasonsSchema = z.array(
   z.looseObject({
@@ -124,6 +143,59 @@ const responseContext = (
   };
 };
 
+const providerErrorFromEnvelope = (
+  envelope: z.infer<typeof providerErrorEnvelopeSchema>,
+  response: Response,
+  endpoint: string,
+  request: RequestInit,
+  responseKeys: string[]
+): RouterAIError => {
+  const errorDetails = providerErrorDetailsSchema.safeParse(envelope.error);
+  const original = errorDetails.success
+    ? (errorDetails.data.message ?? "Provider error")
+    : "Malformed provider error";
+  const rawCode = errorDetails.success ? errorDetails.data.code : undefined;
+  const parsedCode = rawCode ?? Number.NaN;
+  const isTimeout = parsedCode === 408;
+  const confirmedClientError =
+    Number.isInteger(parsedCode) &&
+    parsedCode >= 400 &&
+    parsedCode < 500 &&
+    !isTimeout;
+  const errorStatus =
+    Number.isInteger(parsedCode) && parsedCode >= 400 && parsedCode < 500
+      ? parsedCode
+      : 502;
+  const message = /does not support|unsupported|not support/iu.test(original)
+    ? "Модель не поддерживает один или несколько выбранных параметров. Обновите настройки и повторите запрос."
+    : "Провайдер отклонил параметры генерации. Проверьте настройки и повторите запрос.";
+  console.error(
+    JSON.stringify({
+      endpoint,
+      event: "routerai.provider_error_envelope",
+      providerCode: rawCode,
+      providerMessage: original,
+    })
+  );
+  return new RouterAIError(
+    message,
+    errorStatus,
+    original,
+    request.method === "POST" && !confirmedClientError,
+    {
+      confirmedFailure: confirmedClientError,
+      cost: envelope.usage?.cost,
+      diagnostic: {
+        endpoint,
+        responseKeys,
+        status: response.status,
+      },
+      generationId:
+        response.headers.get("x-generation-id") ?? envelope.id,
+    }
+  );
+};
+
 export class RouterAIClient {
   private explicitApiKey?: string;
   constructor(explicitApiKey?: string) {
@@ -157,12 +229,22 @@ export class RouterAIClient {
         redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch {
+    } catch (error) {
       throw new RouterAIError(
         "Не удалось подтвердить ответ провайдера",
         502,
         undefined,
-        init.method === "POST"
+        init.method === "POST",
+        {
+          diagnostic: {
+            endpoint: path,
+            status: 0,
+            transportFailure:
+              error instanceof Error && error.name === "TimeoutError"
+                ? "timeout"
+                : "network",
+          },
+        }
       );
     }
     if (!response.ok) {
@@ -199,9 +281,24 @@ export class RouterAIClient {
     const response = await this.request(path, init);
     let body: ProviderEnvelope | undefined;
     try {
-      const queryResult1 = await limitedBody(response);
+      const responseBytes = await limitedBody(response);
+      const raw = JSON.parse(responseBytes.toString("utf-8"));
+      const providerError = providerErrorEnvelopeSchema.safeParse(raw);
+      const videoLifecycle = videoResponseSchema.safeParse(raw);
+      if (providerError.success && !videoLifecycle.success) {
+        const responseKeys = Object.keys(raw)
+          .filter((key) => /^[a-z_]{1,40}$/u.test(key))
+          .slice(0, 20);
+        throw providerErrorFromEnvelope(
+          providerError.data,
+          response,
+          path,
+          init,
+          responseKeys
+        );
+      }
       body = providerEnvelopeSchema.parse(
-        JSON.parse(queryResult1.toString("utf-8"))
+        raw
       );
       return schema.parse({
         ...body,
@@ -209,8 +306,7 @@ export class RouterAIClient {
       });
     } catch (error) {
       if (error instanceof RouterAIError) {
-        error.context = responseContext(response, path, body);
-        error.uncertain = init.method === "POST";
+        error.context ??= responseContext(response, path, body);
         throw error;
       }
       throw new RouterAIError(
@@ -299,12 +395,16 @@ export class RouterAIClient {
       ? geminiImageUrls(result)
       : nativeImageUrls(result, request.output_format);
     if (!urls.length || urls.length > 4) {
+      const hasUnpersistableOutput = urls.length > 0;
       throw new RouterAIError(
-        "Провайдер не вернул изображения; требуется сверка задания",
+        hasUnpersistableOutput
+          ? "Провайдер вернул слишком много изображений; требуется сверка задания"
+          : "Провайдер не вернул изображение. Резерв возвращён, списания нет.",
         502,
         undefined,
-        true,
+        hasUnpersistableOutput,
         {
+          confirmedFailure: !hasUnpersistableOutput,
           cost: result.usage?.cost,
           diagnostic: {
             endpoint: gemini ? "/chat/completions" : "/images",

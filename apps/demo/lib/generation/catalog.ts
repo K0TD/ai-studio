@@ -154,10 +154,7 @@ const supportsReferences = (raw: ProviderModel) =>
   Boolean(
     raw.supported_image_references ||
     raw.supports_reference_images ||
-    raw.supported_parameters?.includes("input_references") ||
-    raw.architecture?.input_modalities?.some((modality) =>
-      ["image", "video", "audio"].includes(modality)
-    )
+    raw.supported_parameters?.includes("input_references")
   );
 const supportedInputTypes = (raw: ProviderModel) => {
   const modalities = (raw.architecture?.input_modalities ?? []).filter(
@@ -196,25 +193,23 @@ const catalogCapabilities = (raw: ProviderModel) => {
     maxImageCount: geminiImage ? 1 : Math.min(4, raw.max_image_count ?? 1),
     maxReferenceCount: maxReferenceCount(raw),
     supportedAspectRatios: raw.supported_aspect_ratios,
-    supportedBackgrounds: geminiImage
-      ? ["auto"]
-      : (raw.supported_backgrounds ?? ["auto"]),
+    supportedBackgrounds: geminiImage ? ["auto"] : raw.supported_backgrounds,
     supportedDurations: raw.supported_durations,
     supportedFrameImages: frameImages,
     supportedInputTypes: supportedInputTypes(raw),
     supportedOutputFormats: geminiImage
       ? ["png"]
-      : (raw.supported_output_formats ?? ["png", "jpeg", "webp"]),
-    supportedQualities: geminiImage
-      ? ["auto"]
-      : (raw.supported_qualities ?? ["auto"]),
+      : raw.supported_output_formats,
+    supportedQualities: geminiImage ? ["auto"] : raw.supported_qualities,
     supportedResolutions:
       raw.supported_resolutions ?? raw.supported_image_sizes,
     supportsAudio: raw.generate_audio === true,
     supportsFrameReferences: frameImages.length > 0,
     supportsNegativePrompt:
       raw.supports_negative_prompt === true ||
-      raw.supported_parameters?.includes("negativePrompt"),
+      raw.supported_parameters?.some((parameter) =>
+        ["negativePrompt", "negative_prompt"].includes(parameter)
+      ),
     supportsReferences: supportsReferences(raw),
     supportsSeed:
       !geminiImage && (raw.seed === true || raw.image_seed === true),

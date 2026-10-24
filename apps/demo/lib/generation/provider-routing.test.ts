@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { routerai } from "@/lib/routerai/client";
-import { VIDEO_MODELS } from "@/lib/routerai/models-catalog";
+import { IMAGE_MODELS, VIDEO_MODELS } from "@/lib/routerai/models-catalog";
 import { providerEndpointSchema } from "@/lib/routerai/responses";
 import type { ProviderEndpoint } from "@/lib/routerai/responses";
 
@@ -36,6 +36,57 @@ const endpoint = (value: ProviderEndpoint) =>
   providerEndpointSchema.parse(value);
 
 describe("RouterAI provider selection", () => {
+  test("image input modality alone does not advertise reference attachment support", () => {
+    const base = VIDEO_MODELS.find(
+      (candidate) => candidate.id === "black-forest-labs/flux-3-video"
+    );
+    if (!base) {
+      throw new Error("Missing model fixture");
+    }
+    const imageInputOnly = normalizeCatalogModel(
+      base,
+      {
+        architecture: { input_modalities: ["text", "image"] },
+        id: base.id,
+        pricing: { seconds: 1 },
+        pricing_units: { seconds: "second" },
+      },
+      new Date().toISOString()
+    );
+    expect(imageInputOnly.supportsReferences).toBe(false);
+  });
+  test("uses the live image_pricing variant when quoting image tiers", async () => {
+    const base = IMAGE_MODELS.find(
+      (candidate) => candidate.id === "black-forest-labs/flux-3-image"
+    );
+    if (!base) {
+      throw new Error("Missing image model fixture");
+    }
+    const imageModel = normalizeCatalogModel(
+      base,
+      {
+        id: base.id,
+        image_pricing: [{ price: 0.16, unit: "image", variant: "4k" }],
+      },
+      new Date().toISOString()
+    );
+    routerai.getModelEndpoints = () =>
+      Promise.resolve([
+        endpoint({
+          pricing: { image_output: 0.01 },
+          pricing_units: { image_output: "megapixel" },
+          status: 0,
+          supported_apis: ["/images"],
+          tag: "megapixel",
+        }),
+      ]);
+    const quote = await selectProvider(
+      imageModel,
+      { resolution: "4K" },
+      "test"
+    );
+    expect(quote.estimatedCostRub).toBe("0.16");
+  });
   test("quotes the cheapest active compatible endpoint and supports choosing an alternative", async () => {
     routerai.getModelEndpoints = () =>
       Promise.resolve([

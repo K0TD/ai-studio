@@ -7,11 +7,13 @@ import { ApiError } from "@/lib/security/http";
 import type { CatalogModel } from "./catalog";
 
 const imageOutputFormatSchema = z.enum(["png", "jpeg", "webp", "svg"]);
+const imageBackgroundSettingSchema = z.enum(["auto", "transparent", "opaque"]);
+const imageQualitySettingSchema = z.enum(["auto", "low", "medium", "high"]);
 const imageReference = z.strictObject({ url: z.string().max(500) });
 export const settingsSchema = z.strictObject({
   aspectRatio: z.string().max(20).optional(),
   avatarUrl: z.string().max(500).optional(),
-  background: z.enum(["auto", "transparent", "opaque"]).optional(),
+  background: imageBackgroundSettingSchema.optional(),
   duration: z.number().int().min(1).max(30).optional(),
   frameImages: z
     .array(
@@ -41,7 +43,7 @@ export const settingsSchema = z.strictObject({
   n: z.number().int().min(1).max(4).optional(),
   negativePrompt: z.string().max(2000).optional(),
   outputFormat: imageOutputFormatSchema.optional(),
-  quality: z.enum(["auto", "low", "medium", "high"]).optional(),
+  quality: imageQualitySettingSchema.optional(),
   resolution: z.string().max(30).optional(),
   seed: z.number().int().min(0).max(2_147_483_647).optional(),
   songTitle: z.string().max(80).optional(),
@@ -60,6 +62,24 @@ export const submitRequestSchema = generationRequestSchema.extend({
   quoteId: z.string().uuid(),
 });
 export type GenerationRequest = z.infer<typeof generationRequestSchema>;
+
+export const providerAudioSettings = (
+  model: CatalogModel,
+  generateAudio: boolean | undefined
+) => {
+  const parameters = model.raw.supported_parameters ?? [];
+  const enabled =
+    model.supportsAudio && model.supportsAudioPricing
+      ? (generateAudio ?? false)
+      : false;
+  if (parameters.includes("audio")) {
+    return { audio: enabled };
+  }
+  if (parameters.includes("generate_audio") || model.supportsAudio) {
+    return { generate_audio: enabled };
+  }
+  return {};
+};
 
 export const canonicalJson = (value: GenerationRequest): string =>
   JSON.stringify(
@@ -150,19 +170,10 @@ const aspectFor = (input: GenerationRequest["settings"]) => {
   return input.aspectRatio;
 };
 
-const videoSettings = (
+const validateVideoOptions = (
   input: GenerationRequest["settings"],
   model: CatalogModel
-): GenerationRequest["settings"] => {
-  const duration = input.duration ?? model.supportedDurations?.[0] ?? 5;
-  if (
-    model.supportedDurations?.length &&
-    !model.supportedDurations.includes(duration)
-  ) {
-    fail("длительность");
-  }
-  const resolution = input.resolution ?? model.supportedResolutions?.[0];
-  choice(input.resolution, model.supportedResolutions, "разрешение");
+) => {
   if (input.generateAudio && !model.supportsAudio) {
     fail("аудио");
   }
@@ -172,11 +183,30 @@ const videoSettings = (
   if (model.id.includes("heygen") && !input.inputReferences?.length) {
     fail("изображение аватара обязательно");
   }
+};
+
+const videoSettings = (
+  input: GenerationRequest["settings"],
+  model: CatalogModel
+): GenerationRequest["settings"] => {
+  const duration = input.duration ?? model.supportedDurations?.[0] ?? 5;
+  validateVideoOptions(input, model);
+  if (
+    model.supportedDurations?.length &&
+    !model.supportedDurations.includes(duration)
+  ) {
+    fail("длительность");
+  }
+  const resolution = input.resolution ?? model.supportedResolutions?.[0];
+  choice(input.resolution, model.supportedResolutions, "разрешение");
   return {
     aspectRatio: aspectFor(input),
     duration,
     frameImages: input.frameImages,
-    generateAudio: model.supportsAudio ? (input.generateAudio ?? false) : false,
+    generateAudio:
+      model.supportsAudio && model.supportsAudioPricing
+        ? (input.generateAudio ?? false)
+        : false,
     heygenVoiceId: input.heygenVoiceId,
     inputReferences: input.inputReferences,
     negativePrompt: model.supportsNegativePrompt
@@ -185,6 +215,24 @@ const videoSettings = (
     resolution,
     seed: model.supportsSeed ? input.seed : undefined,
   };
+};
+
+const supportedImageOption = <Schema extends z.ZodType>(
+  input: string | undefined,
+  supported: string[] | undefined,
+  valueSchema: Schema,
+  label: string
+): z.output<Schema> | undefined => {
+  if (!supported?.length) {
+    return;
+  }
+  const selected = input ?? supported[0];
+  choice(selected, supported, label);
+  const parsed = valueSchema.safeParse(selected);
+  if (!parsed.success) {
+    fail(label);
+  }
+  return parsed.data;
 };
 
 const imageSettings = (
@@ -198,25 +246,34 @@ const imageSettings = (
     fail("число изображений");
   }
   choice(input.resolution, model.supportedResolutions, "разрешение");
-  choice(input.quality, model.supportedQualities, "качество");
-  choice(input.background, model.supportedBackgrounds, "фон");
-  const outputFormat =
-    input.outputFormat ?? model.supportedOutputFormats?.[0] ?? "png";
-  choice(outputFormat, model.supportedOutputFormats, "формат файла");
-  const parsedFormat = imageOutputFormatSchema.safeParse(outputFormat);
-  if (!parsedFormat.success) {
-    fail("формат файла");
-  }
+  const background = supportedImageOption(
+    input.background,
+    model.supportedBackgrounds,
+    imageBackgroundSettingSchema,
+    "фон"
+  );
+  const quality = supportedImageOption(
+    input.quality,
+    model.supportedQualities,
+    imageQualitySettingSchema,
+    "качество"
+  );
+  const outputFormat = supportedImageOption(
+    input.outputFormat,
+    model.supportedOutputFormats,
+    imageOutputFormatSchema,
+    "формат файла"
+  );
   return {
     aspectRatio: aspectFor(input),
-    background: input.background,
+    background,
     inputReferences: input.inputReferences,
     n,
     negativePrompt: model.supportsNegativePrompt
       ? input.negativePrompt
       : undefined,
-    outputFormat: parsedFormat.data,
-    quality: input.quality,
+    outputFormat,
+    quality,
     resolution: input.resolution ?? model.supportedResolutions?.[0],
     seed: model.supportsSeed ? input.seed : undefined,
   };

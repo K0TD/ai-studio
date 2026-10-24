@@ -44,6 +44,13 @@ const imagePart = z.object({
   inline_data: z.object({ data: z.string(), mime_type: z.string() }).nullish(),
   type: z.string().optional(),
 });
+const imageDataItem = z.object({
+  b64_json: z.string().nullish(),
+  media_type: z
+    .enum(["image/png", "image/jpeg", "image/webp", "image/svg+xml"])
+    .nullish(),
+  url: z.string().nullish(),
+});
 const imageMessage = z.object({
   content: z.union([z.string(), z.array(imagePart)]).nullish(),
   images: z
@@ -70,9 +77,7 @@ export const imageResponseSchema = z.object({
     )
     .nullish(),
   data: z
-    .array(
-      z.object({ b64_json: z.string().nullish(), url: z.string().nullish() })
-    )
+    .array(imageDataItem)
     .max(4)
     .nullish(),
   id: z.string().max(300).optional(),
@@ -245,7 +250,9 @@ export const nativeImageUrls = (
   const urls: string[] = [];
   for (const image of result.data ?? []) {
     if (image.b64_json) {
-      const mime = format === "svg" ? "image/svg+xml" : `image/${format}`;
+      const mime =
+        image.media_type ??
+        (format === "svg" ? "image/svg+xml" : `image/${format}`);
       urls.push(`data:${mime};base64,${image.b64_json}`);
     } else if (image.url) {
       urls.push(image.url);

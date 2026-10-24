@@ -20,7 +20,14 @@ import type { VideoGenerateRequest } from "@/lib/routerai/types";
 import { ApiError } from "@/lib/security/http";
 
 import { catalogModels, syncCatalog } from "./catalog";
-import { referencedFileIds, localReferenceId, referenceId } from "./contracts";
+import { confirmedImageFailure } from "./confirmed-image-failure";
+import { mergeUncertainProviderResult } from "./provider-result";
+import {
+  referencedFileIds,
+  localReferenceId,
+  referenceId,
+  providerAudioSettings,
+} from "./contracts";
 import type {
   JobRow,
   JobState,
@@ -108,52 +115,31 @@ const recordProvider = async (
   );
 };
 const markReconciling = async (job: Job, context?: ProviderFailureContext) => {
+  const uncertainContext = mergeUncertainProviderResult(
+    job.provider_result,
+    context
+  );
   await pool.query(
     "UPDATE syntx_jobs SET status='reconciling',error='Результат запроса не подтверждён. Средства остаются в резерве до сверки.',provider_id=coalesce($3,provider_id),provider_result=coalesce($4,provider_result),lease_token=NULL,leased_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND settled_at IS NULL",
     [
       job.id,
       job.lease_token,
-      context?.generationId ?? null,
-      context ? JSON.stringify(context) : null,
+      uncertainContext.generationId ?? null,
+      JSON.stringify(uncertainContext),
     ]
   );
   console.error(
     JSON.stringify({
-      diagnostic: context?.diagnostic,
+      diagnostic: uncertainContext.diagnostic,
       event: "generation.reconciling",
       jobId: job.id,
       modelId: job.model_id,
-      providerCostRub: context?.cost,
-      providerId: context?.generationId ?? job.provider_id,
+      providerCostRub: uncertainContext.cost,
+      providerId: uncertainContext.generationId ?? job.provider_id,
       tab: job.tab,
     })
   );
 };
-const confirmedImageFailureSchema = z.object({
-  cost: z.number().nonnegative().optional(),
-  diagnostic: z
-    .object({
-      endpoint: z.string(),
-      outputCount: z.number().int().nonnegative().optional(),
-      status: z.number().int(),
-    })
-    .optional(),
-});
-const serializedConfirmedImageFailureSchema = z
-  .string()
-  .transform((serialized, context) => {
-    try {
-      return JSON.parse(serialized);
-    } catch {
-      context.addIssue({ code: "custom", message: "Invalid stored JSON" });
-      return z.NEVER;
-    }
-  })
-  .pipe(confirmedImageFailureSchema);
-const storedConfirmedImageFailureSchema = z.union([
-  confirmedImageFailureSchema,
-  serializedConfirmedImageFailureSchema,
-]);
 const providerOutputSchema = z
   .object({
     diagnostic: z
@@ -181,21 +167,6 @@ const storedProviderOutputSchema = z.union([
 ]);
 // SQLite stores JSON as text while PostgreSQL returns JSON objects; both are parsed here.
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Database JSON is parsed with the schemas above.
-const confirmedImageFailure = (value: unknown) => {
-  const parsed = storedConfirmedImageFailureSchema.safeParse(value);
-  if (!parsed.success) {
-    return;
-  }
-  const { diagnostic } = parsed.data;
-  if (
-    diagnostic?.status !== 200 ||
-    (diagnostic.outputCount !== undefined && diagnostic.outputCount !== 0) ||
-    !["/images", "/chat/completions"].includes(diagnostic.endpoint)
-  ) {
-    return;
-  }
-  return parsed.data;
-};
 export const releaseConfirmedImageFailures = async () => {
   const { rows } = await pool.query<JobRow>(
     `SELECT * FROM syntx_jobs j WHERE j.status='reconciling' AND j.tab='image'
@@ -319,7 +290,8 @@ const pollVideoStatus = async (job: Job) => {
 
 const settleConfirmedImageFailure = async (
   job: Job,
-  context: ProviderFailureContext
+  context: ProviderFailureContext,
+  reason?: string
 ): Promise<boolean> => {
   if (job.status !== "submitting" || job.tab !== "image") {
     return false;
@@ -340,6 +312,7 @@ const settleConfirmedImageFailure = async (
     leaseToken: job.lease_token ?? undefined,
     providerCost: failure.cost,
     reason:
+      reason ??
       "Провайдер подтвердил запрос, но не вернул изображение. Резерв возвращён, списания пользователю нет.",
     status: "failed",
   });
@@ -493,7 +466,7 @@ const submit = async (job: Job) => {
       aspect_ratio: settings.aspectRatio,
       duration: settings.duration,
       frame_images: references.frames.length ? references.frames : undefined,
-      generate_audio: settings.generateAudio,
+      ...providerAudioSettings(job.catalog_snapshot, settings.generateAudio),
       input_references: references.input.length ? references.input : undefined,
       model: modelId,
       negative_prompt: settings.negativePrompt,
@@ -545,12 +518,22 @@ const submit = async (job: Job) => {
     const result = await traceProviderOperation(job, "image_submit", () =>
       routerai.generateImage({
         aspect_ratio: settings.aspectRatio,
-        background: settings.background,
+        background: job.catalog_snapshot.supportedBackgrounds?.includes(
+          settings.background ?? ""
+        )
+          ? settings.background
+          : undefined,
         input_references: imageReferences.length ? imageReferences : undefined,
         model: modelId,
         n: settings.n,
-        negative_prompt: settings.negativePrompt,
-        output_format: settings.outputFormat,
+        negative_prompt: job.catalog_snapshot.supportsNegativePrompt
+          ? settings.negativePrompt
+          : undefined,
+        output_format: job.catalog_snapshot.supportedOutputFormats?.includes(
+          settings.outputFormat ?? ""
+        )
+          ? settings.outputFormat
+          : undefined,
         prompt,
         provider: job.catalog_snapshot.providerRoute?.tag
           ? {
@@ -558,9 +541,13 @@ const submit = async (job: Job) => {
               only: [job.catalog_snapshot.providerRoute.tag],
             }
           : undefined,
-        quality: settings.quality,
+        quality: job.catalog_snapshot.supportedQualities?.includes(
+          settings.quality ?? ""
+        )
+          ? settings.quality
+          : undefined,
         resolution: settings.resolution,
-        seed: settings.seed,
+        seed: job.catalog_snapshot.supportsSeed ? settings.seed : undefined,
       })
     );
     await recordProvider(job, result, "persisting", result.generationId);
@@ -763,7 +750,11 @@ const handleSubmittingError = async (job: Job, error: Error) => {
   const providerError = error instanceof RouterAIError ? error : undefined;
   if (
     providerError?.context &&
-    (await settleConfirmedImageFailure(job, providerError.context))
+    (await settleConfirmedImageFailure(
+      job,
+      providerError.context,
+      providerError.message
+    ))
   ) {
     job.status = "failed";
     return;

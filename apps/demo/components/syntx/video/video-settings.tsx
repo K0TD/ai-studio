@@ -96,6 +96,42 @@ const VideoDuration = ({ selectedModel }: VideoParametersProps) => {
     </div>
   );
 };
+const VideoAudioSetting = ({ selectedModel }: VideoParametersProps) => {
+  const { videoSettings, updateVideoSettings } = useSyntxStore();
+  if (!selectedModel.supportsAudio) {
+    return null;
+  }
+  if (!selectedModel.supportsAudioPricing) {
+    return (
+      <div className="grid gap-1 text-xs text-muted-foreground">
+        <label className="flex items-center justify-between">
+          Аудиодорожка
+          <input
+            aria-describedby="audio-pricing-hint"
+            checked={false}
+            disabled
+            type="checkbox"
+          />
+        </label>
+        <p id="audio-pricing-hint">
+          Аудио отключено: подтверждённого тарифа провайдера нет.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <label className="flex items-center justify-between">
+      Аудиодорожка
+      <input
+        type="checkbox"
+        checked={videoSettings.generateAudio}
+        onChange={(e) =>
+          updateVideoSettings({ generateAudio: e.target.checked })
+        }
+      />
+    </label>
+  );
+};
 const VideoParameters = ({ selectedModel }: VideoParametersProps) => {
   const { videoSettings, updateVideoSettings } = useSyntxStore();
   return (
@@ -133,18 +169,7 @@ const VideoParameters = ({ selectedModel }: VideoParametersProps) => {
         </label>
       ) : null}
       <VideoDuration selectedModel={selectedModel} />
-      {selectedModel.supportsAudio && (
-        <label className="flex items-center justify-between">
-          Аудиодорожка
-          <input
-            type="checkbox"
-            checked={videoSettings.generateAudio}
-            onChange={(e) =>
-              updateVideoSettings({ generateAudio: e.target.checked })
-            }
-          />
-        </label>
-      )}
+      <VideoAudioSetting selectedModel={selectedModel} />
       {selectedModel.supportsSeed && (
         <label className="grid gap-2">
           Seed

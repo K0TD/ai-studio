@@ -232,8 +232,14 @@ export const settleJob = async (input: Settlement): Promise<void> => {
     if (varianceValue > 0n) {
       console.error(
         JSON.stringify({
+          chargedCostRub: chargedRub,
+          estimatedCostRub: job.estimated_cost_rub,
           event: "generation.cost_variance",
           jobId: job.id,
+          maxCostRub: job.max_cost_rub,
+          modelId: job.model_id,
+          providerCostRub: actual,
+          tab: job.tab,
           varianceRub: variance,
         })
       );

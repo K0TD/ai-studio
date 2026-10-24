@@ -17,6 +17,7 @@ import {
   requestHash,
   referencedFileIds,
   normalizedSettings,
+  providerAudioSettings,
 } from "./contracts";
 
 const id = "00000000-0000-4000-8000-000000000001";
@@ -66,7 +67,7 @@ describe("Generation boundaries and authoritative pricing", () => {
       },
       new Date().toISOString()
     );
-    expect(model.supportsReferences).toBe(true);
+    expect(model.supportsReferences).toBe(false);
     expect(model.supportsFrameReferences).toBe(true);
     expect(model.supportedFrameImages).toEqual(["first_frame", "last_frame"]);
     const normalized = normalizedSettings(
@@ -90,6 +91,45 @@ describe("Generation boundaries and authoritative pricing", () => {
       model
     );
     expect(normalized.frameImages).toHaveLength(1);
+  });
+  test("maps Wan audio-off to the provider's supported audio parameter", () => {
+    const base = VIDEO_MODELS.find((model) => model.id === "alibaba/wan-2.6");
+    if (!base) {
+      throw new Error("Missing Wan 2.6 fixture");
+    }
+    const model = normalizeCatalogModel(
+      base,
+      {
+        generate_audio: true,
+        id: base.id,
+        pricing: { seconds: 4.1879812 },
+        pricing_units: { seconds: "second" },
+        supported_parameters: [
+          "negative_prompt",
+          "enable_prompt_expansion",
+          "shot_type",
+          "audio",
+          "size",
+        ],
+      },
+      new Date().toISOString()
+    );
+    expect(providerAudioSettings(model, false)).toEqual({ audio: false });
+    expect(providerAudioSettings(model, true)).toEqual({ audio: false });
+    expect(model.supportsAudio).toBe(true);
+    expect(model.supportsAudioPricing).not.toBe(true);
+    const normalized = normalizedSettings(
+      {
+        ...request,
+        modelId: model.id,
+        prompt: "Видео",
+        settings: { duration: 5, generateAudio: true },
+        tab: "video",
+      },
+      model
+    );
+    expect(normalized.generateAudio).toBe(false);
+    expect(estimate(model, normalized, "Видео")).toBe("20.94");
   });
   test("idempotency hash is independent of object property insertion order", () => {
     expect(requestHash(request)).toBe(

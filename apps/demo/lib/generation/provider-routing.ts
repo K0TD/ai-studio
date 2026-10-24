@@ -25,56 +25,131 @@ const supports = (values: string[] | undefined, names: string[]): boolean =>
     )
   ) ?? false;
 
+const endpointVideoCost = (
+  endpoint: ProviderEndpoint,
+  settings: GenerationRequest["settings"]
+): string | null => {
+  const rate = Number(endpoint.pricing.seconds);
+  if (
+    endpoint.pricing_units.seconds !== "second" ||
+    !Number.isFinite(rate) ||
+    rate <= 0
+  ) {
+    return null;
+  }
+  return costRub(rate * (settings.duration ?? 5));
+};
+
+interface ImageVariantCost {
+  configured: boolean;
+  cost: string | null;
+}
+
+const imageVariantCost = (
+  model: CatalogModel,
+  settings: GenerationRequest["settings"]
+): ImageVariantCost => {
+  const prices = (model.raw.image_pricing ?? []).filter(
+    (candidate) => candidate.unit === "image"
+  );
+  if (!prices.length) {
+    return { configured: false, cost: null };
+  }
+  const variant = [settings.resolution, settings.quality]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const selected =
+    prices.find((candidate) => candidate.variant?.toLowerCase() === variant) ??
+    prices.find(
+      (candidate) =>
+        candidate.variant?.toLowerCase() === settings.resolution?.toLowerCase()
+    ) ??
+    prices.find((candidate) => candidate.variant === null);
+  return {
+    configured: true,
+    cost: selected ? costRub(selected.price * (settings.n ?? 1)) : null,
+  };
+};
+
+const megapixelImageCost = (
+  endpoint: ProviderEndpoint,
+  settings: GenerationRequest["settings"]
+): string | null => {
+  const price = endpoint.pricing;
+  const units = endpoint.pricing_units;
+  const key = ["image_output", "image"].find(
+    (candidate) =>
+      units[candidate] === "megapixel" && Number(price[candidate]) > 0
+  );
+  if (!key) {
+    return null;
+  }
+  const resolution = settings.resolution?.toLowerCase() ?? "1k";
+  const dimensions = /^(\d{3,5})x(\d{3,5})$/u.exec(resolution);
+  const megapixels = dimensions
+    ? (Number(dimensions[1]) * Number(dimensions[2])) / 1_000_000
+    : (() => {
+        const tier = /^(\d+)\s*mp$/u.exec(resolution);
+        return tier ? Number(tier[1]) : 0;
+      })();
+  if (!Number.isFinite(megapixels) || megapixels <= 0) {
+    return null;
+  }
+  return costRub(Number(price[key]) * megapixels * (settings.n ?? 1));
+};
+
+const endpointImageCost = (
+  endpoint: ProviderEndpoint,
+  model: CatalogModel,
+  settings: GenerationRequest["settings"]
+): string | null => {
+  const variant = imageVariantCost(model, settings);
+  if (variant.configured) {
+    return variant.cost;
+  }
+  const price = endpoint.pricing;
+  const units = endpoint.pricing_units;
+  const key = ["image", "images", "image_output"].find(
+    (candidate) =>
+      units[candidate] === "image" && Number(price[candidate]) > 0
+  );
+  if (key) {
+    return costRub(Number(price[key]) * (settings.n ?? 1));
+  }
+  return megapixelImageCost(endpoint, settings);
+};
+
+const endpointSpeechCost = (
+  endpoint: ProviderEndpoint,
+  prompt: string
+): string | null => {
+  const key = ["prompt", "character", "characters"].find(
+    (candidate) =>
+      endpoint.pricing_units[candidate] === "character" &&
+      Number(endpoint.pricing[candidate]) > 0
+  );
+  if (!key) {
+    return null;
+  }
+  return costRub(
+    Number(endpoint.pricing[key]) * Math.max(1, [...prompt].length)
+  );
+};
+
 const endpointCost = (
   endpoint: ProviderEndpoint,
   model: CatalogModel,
   settings: GenerationRequest["settings"],
   prompt: string
 ): string | null => {
-  const price = endpoint.pricing;
-  const units = endpoint.pricing_units;
   if (model.category === "video") {
-    const rate = Number(price.seconds);
-    if (units.seconds !== "second" || !Number.isFinite(rate) || rate <= 0) {
-      return null;
-    }
-    return costRub(rate * (settings.duration ?? 5));
+    return endpointVideoCost(endpoint, settings);
   }
   if (model.category === "image") {
-    const key = ["image", "images", "image_output"].find(
-      (candidate) =>
-        units[candidate] === "image" && Number(price[candidate]) > 0
-    );
-    if (key) {
-      return costRub(Number(price[key]) * (settings.n ?? 1));
-    }
-    const megapixelKey = ["image_output", "image"].find(
-      (candidate) =>
-        units[candidate] === "megapixel" && Number(price[candidate]) > 0
-    );
-    if (!megapixelKey) {
-      return null;
-    }
-    const resolution = settings.resolution?.toLowerCase() ?? "1k";
-    const dimensions = /^(\d{3,5})x(\d{3,5})$/u.exec(resolution);
-    const megapixels = dimensions
-      ? (Number(dimensions[1]) * Number(dimensions[2])) / 1_000_000
-      : Number(/^([1-4])\s*(?:mp|k)$/u.exec(resolution)?.[1] ?? 0);
-    if (!Number.isFinite(megapixels) || megapixels <= 0) {
-      return null;
-    }
-    return costRub(
-      Number(price[megapixelKey]) * megapixels * (settings.n ?? 1)
-    );
+    return endpointImageCost(endpoint, model, settings);
   }
-  const key = ["prompt", "character", "characters"].find(
-    (candidate) =>
-      units[candidate] === "character" && Number(price[candidate]) > 0
-  );
-  if (!key) {
-    return null;
-  }
-  return costRub(Number(price[key]) * Math.max(1, [...prompt].length));
+  return endpointSpeechCost(endpoint, prompt);
 };
 
 const endpointSupportsRequest = (

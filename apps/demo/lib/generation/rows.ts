@@ -6,6 +6,7 @@ import type { CatalogModel } from "./catalog";
 import type { GenerationRequest } from "./contracts";
 
 export interface StoredProviderResult {
+  confirmedFailure?: boolean;
   id?: string;
   status?: RouterAIVideoResponse["status"];
   unsigned_urls?: string[];

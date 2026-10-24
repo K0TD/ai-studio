@@ -3,6 +3,7 @@ import { mkdir, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { synchronizeAdmin } from "../../lib/admin/bootstrap";
 import { auth } from "../../lib/auth";
@@ -354,6 +355,14 @@ try {
     await workerTick();
     await assertJobStatus(uncertain.owner.id, uncertain.item.id, "reconciling");
     await assertWallet(uncertain.owner.id, "100.00", "4.80");
+    const uncertainRow = await jobRow(uncertain.item.id);
+    const uncertainResult = z
+      .union([
+        z.string().transform((stored) => JSON.parse(stored)),
+        z.object({ confirmedFailure: z.boolean().optional() }).passthrough(),
+      ])
+      .parse(uncertainRow.provider_result);
+    assert.equal(uncertainResult?.confirmedFailure, false);
     assert.equal(posts, 3);
     await assertAdminJobResponse(successful.item.id, uncertain.item.id);
     await releaseExpiredUnconfirmedSubmissions();

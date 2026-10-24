@@ -77,10 +77,10 @@ export const VIDEO_FAMILIES: ModelFamily[] = [
         supportsAudio: false,
       },
       {
-        basePriceRub: 5.5,
+        basePriceRub: 4.1879812,
         category: "video",
         description:
-          "Проверенная версия Wan 2.6 для рекламных роликов и контента соцсетей. 5.50 ₽/сек.",
+          "Проверенная версия Wan 2.6 для рекламных роликов и контента соцсетей. Около 4.19 ₽/сек.",
         familyId: "wan",
         familyName: "Wan",
         id: "alibaba/wan-2.6",
@@ -91,10 +91,11 @@ export const VIDEO_FAMILIES: ModelFamily[] = [
           { id: "text2video", name: "Text to Video" },
           { id: "img2video", name: "Image to Video" },
         ],
-        supportedAspectRatios: ["16:9", "9:16", "1:1"],
+        supportedAspectRatios: ["16:9", "9:16"],
         supportedDurations: [5, 10],
-        supportedResolutions: ["480p", "720p"],
-        supportsAudio: false,
+        supportedResolutions: ["720p", "1080p"],
+        supportsAudio: true,
+        supportsAudioPricing: false,
       },
       {
         badge: "Быстрая",

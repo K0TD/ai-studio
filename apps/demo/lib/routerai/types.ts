@@ -83,6 +83,8 @@ export interface ModelMetadata {
   supportedResolutions?: string[];
   supportedDurations?: number[];
   supportsAudio?: boolean;
+  /** Audio output may only be enabled when its tariff is confirmed. */
+  supportsAudioPricing?: boolean;
   subModes?: { id: string; name: string }[];
   description?: string;
   supportedQualities?: string[];
@@ -107,6 +109,7 @@ export interface VideoGenerateRequest {
   aspect_ratio?: string;
   duration?: number;
   resolution?: string;
+  audio?: boolean;
   generate_audio?: boolean;
   seed?: number;
   negative_prompt?: string;

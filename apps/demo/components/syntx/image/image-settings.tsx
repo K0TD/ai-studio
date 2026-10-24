@@ -7,6 +7,14 @@ import { useSyntxStore } from "@/lib/store/syntx-store";
 import { ModelAvailability } from "../shell/model-availability";
 const input =
   "w-full rounded-lg border border-border bg-background p-2 text-xs";
+const isBackground = (
+  value: string
+): value is "auto" | "transparent" | "opaque" =>
+  value === "auto" || value === "transparent" || value === "opaque";
+const isOutputFormat = (
+  value: string
+): value is "png" | "jpeg" | "webp" | "svg" =>
+  value === "png" || value === "jpeg" || value === "webp" || value === "svg";
 interface ImageParametersProps {
   selectedModel: ModelMetadata;
 }
@@ -54,12 +62,11 @@ const ImageParameters = ({ selectedModel }: ImageParametersProps) => {
             value={imageSettings.quality}
             onChange={(e) => updateImageSettings({ quality: e.target.value })}
           >
-            <option value="auto">Auto</option>
-            {selectedModel.supportedQualities
-              .filter((q) => q !== "auto")
-              .map((quality) => (
-                <option key={quality}>{quality}</option>
-              ))}
+            {selectedModel.supportedQualities.map((quality) => (
+              <option value={quality} key={quality}>
+                {quality === "auto" ? "Auto" : quality}
+              </option>
+            ))}
           </select>
         </label>
       ) : null}
@@ -80,33 +87,32 @@ const ImageParameters = ({ selectedModel }: ImageParametersProps) => {
           )}
         </select>
       </label>
-      <label className="grid gap-2">
-        Формат
-        <select
-          className={input}
-          value={imageSettings.outputFormat}
-          onChange={(e) => {
-            const outputFormat = e.target.value;
-            if (
-              outputFormat === "png" ||
-              outputFormat === "jpeg" ||
-              outputFormat === "webp" ||
-              outputFormat === "svg"
-            ) {
-              updateImageSettings({ outputFormat });
-            }
-          }}
-        >
-          {(selectedModel.supportedOutputFormats?.length
-            ? selectedModel.supportedOutputFormats
-            : ["png"]
-          ).map((format) => (
-            <option value={format} key={format}>
-              {format.toUpperCase()}
-            </option>
-          ))}
-        </select>
-      </label>
+      {selectedModel.supportedOutputFormats?.length ? (
+        <label className="grid gap-2">
+          Формат
+          <select
+            className={input}
+            value={imageSettings.outputFormat}
+            onChange={(e) => {
+              const outputFormat = e.target.value;
+              if (
+                outputFormat === "png" ||
+                outputFormat === "jpeg" ||
+                outputFormat === "webp" ||
+                outputFormat === "svg"
+              ) {
+                updateImageSettings({ outputFormat });
+              }
+            }}
+          >
+            {selectedModel.supportedOutputFormats.map((format) => (
+              <option value={format} key={format}>
+                {format.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {selectedModel.supportedBackgrounds?.length ? (
         <label className="grid gap-2">
           Фон
@@ -124,12 +130,11 @@ const ImageParameters = ({ selectedModel }: ImageParametersProps) => {
               }
             }}
           >
-            <option value="auto">Auto</option>
-            {selectedModel.supportedBackgrounds
-              .filter((b) => b !== "auto")
-              .map((background) => (
-                <option key={background}>{background}</option>
-              ))}
+            {selectedModel.supportedBackgrounds.map((background) => (
+              <option value={background} key={background}>
+                {background === "auto" ? "Auto" : background}
+              </option>
+            ))}
           </select>
         </label>
       ) : null}
@@ -212,12 +217,12 @@ export const ImageSettingsPanel = () => {
     }
     updateImageSettings({
       aspectRatio: next.supportedAspectRatios?.[0] ?? "auto",
-      background: "auto",
+      background: next.supportedBackgrounds?.find(isBackground) ?? "auto",
       modelId: id,
       n: 1,
       negativePrompt: undefined,
-      outputFormat: "png",
-      quality: "auto",
+      outputFormat: next.supportedOutputFormats?.find(isOutputFormat) ?? "png",
+      quality: next.supportedQualities?.[0] ?? "auto",
       referenceImageUrl: undefined,
       resolution: next.supportedResolutions?.[0] ?? "1K",
       seed: undefined,

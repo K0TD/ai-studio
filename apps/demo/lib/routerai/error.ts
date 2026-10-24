@@ -1,9 +1,11 @@
 export interface ProviderFailureContext {
+  confirmedFailure?: boolean;
   generationId?: string;
   cost?: number;
   diagnostic?: {
     endpoint: string;
     status: number;
+    transportFailure?: "timeout" | "network";
     responseKeys?: string[];
     finishReasons?: string[];
     outputCount?: number;

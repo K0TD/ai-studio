@@ -42,6 +42,20 @@ const image = "iVBORw0KGgo=";
 const dataUrl = `data:image/png;base64,${image}`;
 
 describe("RouterAI image and speech response contracts", () => {
+  test("video lifecycle errors reach the normal failed-status response parser", async () => {
+    const client = new FixtureClient(() =>
+      Response.json({
+        error: { message: "Provider could not render this video" },
+        id: "video-failed",
+        status: "failed",
+      })
+    );
+    await expect(client.getVideoStatus("video-failed")).resolves.toMatchObject({
+      error: { message: "Provider could not render this video" },
+      id: "video-failed",
+      status: "failed",
+    });
+  });
   test("reads actual billing for binary endpoints by generation ID", async () => {
     const client = new FixtureClient(() =>
       Response.json({ total_cost: "105.46" })
@@ -71,6 +85,108 @@ describe("RouterAI image and speech response contracts", () => {
       generationId: "gen-native",
       urls: [dataUrl],
     });
+  });
+  test("confirms a valid synchronous image response with no outputs as a final failure", async () => {
+    const client = new FixtureClient(() =>
+      Response.json({
+        data: [],
+        id: "gen-empty",
+        usage: { cost: 3.4 },
+      })
+    );
+    await expect(
+      client.generateImage({
+        model: "black-forest-labs/flux-3-image",
+        prompt: "test",
+      })
+    ).rejects.toMatchObject({
+      context: {
+        confirmedFailure: true,
+        cost: 3.4,
+        diagnostic: { endpoint: "/images", outputCount: 0, status: 200 },
+        generationId: "gen-empty",
+      },
+      uncertain: false,
+    });
+  });
+  test("treats a 2xx provider error envelope with a 4xx code as a confirmed rejection", async () => {
+    const client = new FixtureClient(() =>
+      Response.json(
+        {
+          error: {
+            code: 400,
+            message:
+              "Black Forest Labs FLUX 3 Image does not support: output_format, quality, background.",
+          },
+        },
+        { headers: { "X-Generation-Id": "gen-rejected" } }
+      )
+    );
+    await expect(
+      client.generateImage({
+        model: "black-forest-labs/flux-3-image",
+        prompt: "test",
+      })
+    ).rejects.toMatchObject({
+      context: { confirmedFailure: true, generationId: "gen-rejected" },
+      details:
+        "Black Forest Labs FLUX 3 Image does not support: output_format, quality, background.",
+      message:
+        "Модель не поддерживает один или несколько выбранных параметров. Обновите настройки и повторите запрос.",
+      status: 400,
+      uncertain: false,
+    });
+  });
+  test("treats a 2xx provider error envelope with code 408 as an uncertain timeout", async () => {
+    const client = new FixtureClient(() =>
+      Response.json({
+        error: { code: 408, message: "Provider request timed out" },
+      })
+    );
+    await expect(
+      client.generateImage({
+        model: "black-forest-labs/flux-3-image",
+        prompt: "test",
+      })
+    ).rejects.toMatchObject({
+      context: { confirmedFailure: false },
+      status: 408,
+      uncertain: true,
+    });
+  });
+  test("does not confirm a 2xx image error envelope with a 5xx or missing code", async () => {
+    const responses = [
+      {
+        data: null,
+        error: { code: 500, message: "Provider image backend failed" },
+      },
+      {
+        error: { code: 500, message: "Provider image backend failed" },
+        status: 500,
+      },
+      {
+        data: [],
+        error: { code: 500, message: "Provider image backend failed" },
+        id: "gen-error-empty",
+        usage: { cost: 3.4 },
+      },
+      { error: { message: "Provider image backend failed" } },
+    ];
+    for (const providerResponse of responses) {
+      const client = new FixtureClient(() =>
+        Response.json(providerResponse)
+      );
+      await expect(
+        client.generateImage({
+          model: "black-forest-labs/flux-3-image",
+          prompt: "test",
+        })
+      ).rejects.toMatchObject({
+        context: { confirmedFailure: false },
+        status: 502,
+        uncertain: true,
+      });
+    }
   });
   test("Gemini accepts nullable text alongside images and sends references as multimodal content", async () => {
     const client = new FixtureClient(() =>
@@ -134,7 +250,7 @@ describe("RouterAI image and speech response contracts", () => {
     });
     expect(result.urls).toEqual([dataUrl, "data:image/webp;base64,YWJj"]);
   });
-  test("text-only results retain reconciliation ID and cost without retaining private text", async () => {
+  test("text-only results retain confirmed failure details without private text", async () => {
     const client = new FixtureClient(() =>
       Response.json({
         choices: [
@@ -159,8 +275,9 @@ describe("RouterAI image and speech response contracts", () => {
         throw error;
       }
       const providerError = error;
-      expect(providerError.uncertain).toBe(true);
+      expect(providerError.uncertain).toBe(false);
       expect(providerError.context).toMatchObject({
+        confirmedFailure: true,
         cost: 7.25,
         diagnostic: { finishReasons: ["content_filter"] },
         generationId: "gen-empty",

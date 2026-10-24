@@ -156,29 +156,34 @@ const videoRequest = (
 const imageRequest = (
   settings: ImageSettings,
   attachments: UploadedReference[],
-  supportsReferences: boolean
+  model: ModelMetadata | undefined
 ): GenerationSettings => {
   const result: GenerationSettings = {
     aspectRatio: settings.aspectRatio,
-    background: settings.background,
+    background: model?.supportedBackgrounds?.includes(settings.background)
+      ? settings.background
+      : undefined,
     n: settings.n,
-    negativePrompt: settings.negativePrompt,
-    outputFormat: settings.outputFormat,
-    quality: settings.quality,
+    negativePrompt: model?.supportsNegativePrompt
+      ? settings.negativePrompt
+      : undefined,
+    outputFormat: model?.supportedOutputFormats?.includes(settings.outputFormat)
+      ? settings.outputFormat
+      : undefined,
+    quality: model?.supportedQualities?.includes(settings.quality)
+      ? settings.quality
+      : undefined,
     resolution: settings.resolution,
-    seed: settings.seed,
+    seed: model?.supportsSeed ? settings.seed : undefined,
   };
-  if (!supportsReferences) {
-    return result;
-  }
-  if (attachments.length) {
+  if (model?.supportsReferences && attachments.length) {
     result.inputReferences = attachments
       .filter((attachment) => attachment.mimeType.startsWith("image/"))
       .map((attachment) => ({
         file: { file_id: attachment.id },
         type: "file",
       }));
-  } else if (settings.referenceImageUrl) {
+  } else if (model?.supportsReferences && settings.referenceImageUrl) {
     result.inputReferences = [
       { image_url: { url: settings.referenceImageUrl }, type: "image_url" },
     ];
@@ -211,7 +216,7 @@ const promptRequest = (
       settings: imageRequest(
         state.imageSettings,
         attachments,
-        model?.supportsReferences === true
+        model
       ),
       tab: "image",
     };
